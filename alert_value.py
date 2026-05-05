@@ -74,11 +74,12 @@ def run_value_scanner():
             # 3. 부채비율 (Debt to Equity): 150% 미만 (재무 건전성)
             debt_ratio = info.get('debtToEquity')
 
-            # 필터링 로직: 저PBR 이면서 저PER인 우량주 추출
-            if pbr and per and pbr < 1.3 and per < 15:
-                # 부채비율 조건 (데이터가 있을 경우에만 체크)
-                if debt_ratio and debt_ratio > 150:
-                    continue
+            # 데이터가 존재할 때만 비교 (하나라도 없으면 통과하지 못하는 문제 해결)
+            if pbr is not None and per is not None:
+                if pbr < 1.3 and per < 15:
+                    # 부채비율은 데이터가 있을 때만 체크하고, 없으면 일단 패스
+                    if debt_ratio and debt_ratio > 150:
+                        continue
                 
                 found_value_stocks.append(
                     f"💎 *[가치 저평가 발견]*: {name}({ticker})\n"
