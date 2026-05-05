@@ -90,7 +90,7 @@ def run_fvg_scanner():
             df = all_data[ticker].dropna()
             if len(df) < 40: continue
 
-            # 지표 계산
+            # 1. 지표 계산
             df['RSI'] = ta.rsi(df['Close'], length=14)
             df['EMA60'] = ta.ema(df['Close'], length=60)
             macd = ta.macd(df['Close'])
@@ -101,26 +101,42 @@ def run_fvg_scanner():
             prev = df.iloc[-2]
             name = ticker_dict.get(ticker, ticker)
             
-            # FVG 감지 추가
+            # 2. 필수 변수 선언 (오류 방지)
+            rsi_val = round(float(curr['RSI']), 2)
             fvg_status = detect_fvg(df)
-
-            # 타점 조건: EMA60 위 + MACD 골든크로스 (SMC 기본 전략)
+            # SMC 기본 전략 (EMA60 위 + MACD 골든크로스)
             is_smc_signal = curr['Close'] > curr['EMA60'] and prev['MACD'] < prev['MACD_S'] and curr['MACD'] > curr['MACD_S']
+            smc_txt = "SMC 돌파 🚀" if is_smc_signal else "대기 중"
+
+            # 3. 필터링 로직 (사야 해! vs 팔아야 해!)
+            # [사야 해! 🔥] SMC 타점 OR (과매도 35이하 AND 상승 FVG)
+            is_buy_signal = is_smc_signal or (rsi_val <= 35 and "Bullish" in str(fvg_status))
             
-            # 신호가 하나라도 있으면 알림 대상
-            if is_smc_signal or fvg_status:
-                rsi_val = round(float(curr['RSI']), 2)
-                smc_txt = "터짐 🚀" if is_smc_signal else "대기 중"
-                fvg_txt = fvg_status if fvg_status else "없음"
-                
+            # [팔아야 해! ❄️] 과열(RSI 70이상) OR 하락 FVG 발생
+            is_sell_signal = (rsi_val >= 70) or ("Bearish" in str(fvg_status))
+
+            # 4. 알람 생성
+            if is_buy_signal:
+                # SMC가 터진 건지, 단순 바닥 반등인지 태그 정리
+                buy_type = "강력 매수(SMC) 🔥" if is_smc_signal else "바닥 반등(FVG) 💎"
                 found_signals.append(
-                    f"✅ *종목*: {name}\n"
+                    f"🔥 *[사야 해!]*: {name}\n"
                     f"   *현재가*: {int(curr['Close']):,}원\n"
+                    f"   *구분*: {buy_type}\n"
                     f"   *RSI*: {rsi_val}\n"
-                    f"   *SMC*: {smc_txt}\n"
-                    f"   *FVG*: {fvg_txt}"
+                    f"   *FVG*: {fvg_status if fvg_status else '없음'}"
                 )
-        except:
+            elif is_sell_signal:
+                sell_type = "과열 익절 ❄️" if rsi_val >= 70 else "하락 주의 ⚠️"
+                found_signals.append(
+                    f"❄️ *[팔아야 해!]*: {name}\n"
+                    f"   *현재가*: {int(curr['Close']):,}원\n"
+                    f"   *구분*: {sell_type}\n"
+                    f"   *RSI*: {rsi_val}\n"
+                    f"   *FVG*: {fvg_status if fvg_status else '없음'}"
+                )
+        except Exception as e:
+            # print(f"Error scanning {ticker}: {e}") # 디버깅용
             continue
 
     if found_signals:
