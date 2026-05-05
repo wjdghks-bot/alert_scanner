@@ -46,18 +46,18 @@ def get_extensive_tickers():
 
 
 def scan_logic(ticker, name):
-    # 코스피(.KS)로 먼저 시도해보고 안되면 코스닥(.KQ)으로 시도하는 듀얼 체크
     for suffix in ['KS', 'KQ']:
         try:
             full_ticker = f"{ticker}.{suffix}"
             df = yf.download(full_ticker, period="150d", interval="1d", progress=False, timeout=5)
 
-            if df is None or len(df) < 60: continue  # 데이터 없으면 다음 suffix로
+            if df is None or len(df) < 60: continue
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
 
-            # 지표 계산
+            # --- 지표 계산 추가 ---
             df['EMA60'] = ta.ema(df['Close'], length=60)
+            df['RSI'] = ta.rsi(df['Close'], length=14) # RSI 추가
             macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
             df['MACD'] = macd.iloc[:, 0]
             df['MACD_S'] = macd.iloc[:, 2]
@@ -65,23 +65,30 @@ def scan_logic(ticker, name):
             curr = df.iloc[-1]
             prev = df.iloc[-2]
 
-            # 필터: 60일선 위 + MACD 골든크로스 + 거래대금(테스트 위해 1억으로 설정)
+            # 필터 조건: 60일선 위 + MACD 골든크로스 + 거래대금 1억 이상
             curr_value = float(curr['Close'] * curr['Volume'])
 
             if curr['Close'] > curr['EMA60'] and (prev['MACD'] < prev['MACD_S']) and (curr['MACD'] > curr['MACD_S']):
-                if curr_value > 100000000:  # 1억 이상 (실전엔 300억으로 수정)
+                if curr_value > 100000000: 
+                    # SMC 로직: FVG 체크
                     has_fvg = False
                     if len(df) >= 3:
                         if df['Low'].iloc[-1] > df['High'].iloc[-3]: has_fvg = True
 
                     fvg_icon = "✅ FVG" if has_fvg else "❌ FVG"
+                    curr_rsi = float(curr['RSI'])
                     change_rate = ((curr['Close'] - prev['Close']) / prev['Close']) * 100
 
-                    msg = f"🚀 *[광범위 포착]* `{name}`\n금액: {float(curr['Close']):,.0f}원 ({change_rate:+.2f}%)\n대금: {curr_value / 100000000:,.1f}억 / {fvg_icon}"
+                    # 메시지에 RSI 지수 포함
+                    msg = (f"🚀 *[포착]* `{name}`\n"
+                           f"금액: {float(curr['Close']):,.0f}원 ({change_rate:+.2f}%)\n"
+                           f"대금: {curr_value / 100000000:,.1f}억\n"
+                           f"지표: RSI {curr_rsi:.1f} / {fvg_icon}")
+                    
                     send_telegram(msg)
-                    print(f"[!] {name} ({full_ticker}) 발견")
-                    return  # 하나라도 성공하면 다음 종목으로
-        except:
+                    print(f"[!] {name} 발견 (RSI: {curr_rsi:.1f})")
+                    return
+        except Exception as e:
             continue
 
 
