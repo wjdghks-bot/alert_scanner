@@ -98,7 +98,7 @@ def run_fvg_scanner():
             exp2 = df['Close'].ewm(span=26, adjust=False).mean()
             macd = exp1 - exp2
             signal = macd.ewm(span=9, adjust=False).mean()
-            # --- [4단계 정밀 필터링 로직] ---
+            # --- [3단계 정밀 필터링 로직] ---
             
             # 1. 매수 강추천 (Strong Buy): MACD 골든크로스 + Bullish FVG (신뢰도 최상)
             is_strong_buy = (macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]) and \
@@ -108,7 +108,7 @@ def run_fvg_scanner():
             is_buy = (macd.iloc[-1] > signal.iloc[-1] and rsi_val <= 50) and not is_strong_buy
             
             # 3. 매도 추천 (Sell): RSI 80 초과 + Bearish FVG 발생 (탈출 신호)
-            is_sell = (rsi_val > 80) and ("Bearish" in str(fvg_status))
+            is_sell = (rsi_val > 70) and ("Bearish" in str(fvg_status))
 
             if is_strong_buy:
                 found_signals.append(
