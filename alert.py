@@ -98,32 +98,48 @@ def run_fvg_scanner():
             exp2 = df['Close'].ewm(span=26, adjust=False).mean()
             macd = exp1 - exp2
             signal = macd.ewm(span=9, adjust=False).mean()
-
-            # --- [비대칭 필터링] ---
-            # 매수(완화): MACD 골든크로스 상태 유지 + RSI 65 이하 OR Bullish FVG
-            is_relaxed_buy = (macd.iloc[-1] > signal.iloc[-1] and rsi_val <= 65) or \
-                             ("Bullish" in str(fvg_status))
+            # --- [4단계 정밀 필터링 로직] ---
             
-            # 매도(강화): RSI 80 초과 AND Bearish FVG 동시 발생 (쌍방 검증)
-            is_strict_sell = (rsi_val > 80) and ("Bearish" in str(fvg_status))
+            # 1. 매수 강추천 (Strong Buy): MACD 골든크로스 + Bullish FVG (신뢰도 최상)
+            is_strong_buy = (macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]) and \
+                            ("Bullish" in str(fvg_status))
+            
+            # 2. 매수 추천 (Buy): MACD 상승 추세 유지 + RSI 50 이하 (눌림목/저평가)
+            is_buy = (macd.iloc[-1] > signal.iloc[-1] and rsi_val <= 50) and not is_strong_buy
+            
+            # 3. 매도 추천 (Sell): RSI 80 초과 + Bearish FVG 발생 (탈출 신호)
+            is_sell = (rsi_val > 80) and ("Bearish" in str(fvg_status))
+            
+            # 4. 관망 (Watch): 위 조건엔 안 맞지만 변동성이 생길 수 있는 구간 (RSI 과열 조짐 등)
+            is_watch = (rsi_val >= 70 and not is_sell) or (rsi_val <= 35 and not is_buy)
 
-            if is_strict_sell:
+            if is_strong_buy:
                 found_signals.append(
-                    f"❄️ *[확정 매도]*: {name}({ticker})\n"
-                    f"   *현재가*: {int(curr['Close']):,}원\n"
-                    f"   *구분*: 강력 과열 및 하락 확정 ⚠️\n"
-                    f"   *RSI*: {rsi_val}\n"
-                    f"   *FVG*: {fvg_status}"
+                    f"🚀 *[매수 강추천]*: {name}({ticker})\n"
+                    f"   *구분*: 골든크로스 + SMC 지지 확인 🎯\n"
+                    f"   *RSI*: {rsi_val} / *FVG*: {fvg_status}"
                 )
             
-            elif is_relaxed_buy:
-                buy_type = "추세 상승 유지 📈" if (macd.iloc[-1] > signal.iloc[-1]) else "SMC 바닥 지지 🎯"
+            elif is_buy:
                 found_signals.append(
                     f"🔥 *[매수 추천]*: {name}({ticker})\n"
-                    f"   *현재가*: {int(curr['Close']):,}원\n"
-                    f"   *구분*: {buy_type}\n"
-                    f"   *RSI*: {rsi_val}\n"
-                    f"   *FVG*: {fvg_status if fvg_status else '없음'}"
+                    f"   *구분*: 저평가 구간 추세 상승 📈\n"
+                    f"   *RSI*: {rsi_val} / *FVG*: {fvg_status if fvg_status else '없음'}"
+                )
+
+            elif is_sell:
+                found_signals.append(
+                    f"❄️ *[매도 추천]*: {name}({ticker})\n"
+                    f"   *구분*: 강력 과열 및 하락 징후 ⚠️\n"
+                    f"   *RSI*: {rsi_val} / *FVG*: {fvg_status}"
+                )
+
+            elif is_watch:
+                status = "과열 조짐 🟡" if rsi_val >= 70 else "과매도 구간 🔵"
+                found_signals.append(
+                    f"👀 *[관망]*: {name}({ticker})\n"
+                    f"   *상태*: {status}\n"
+                    f"   *RSI*: {rsi_val}"
                 )
                 
         except Exception:
