@@ -20,9 +20,11 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Script
+      - name: Run All Scanners
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        # 파일명이 alert.py이므로 아래와 같이 실행합니다.
-        run: python alert.py
+        # 여러 줄의 명령어를 실행할 때는 아래와 같이 '|'를 사용합니다.
+        run: |
+          python alert.py
+          python alert_value.py
