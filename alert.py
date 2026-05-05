@@ -144,7 +144,12 @@ def run_fvg_scanner():
             continue
 
     if found_signals:
-        # 텔레그램 메시지 전송 (중략)
+        # 5개씩 끊어서 텔레그램으로 전송 (메시지 길이 제한 방지)
+        for i in range(0, len(found_signals), 5):
+            send_msg("\n\n".join(found_signals[i:i+5]))
+        print(f"✅ 총 {len(found_signals)}건의 공격적 매수/관망 신호 전송 완료!")
+    else:
+        print("🔍 현재 조건(공격적 모드)을 만족하는 종목이 없습니다.")
 
 if __name__ == "__main__":
     run_fvg_scanner()
