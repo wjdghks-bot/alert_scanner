@@ -28,6 +28,19 @@ def get_broad_market_tickers():
         "006400.KS": "삼성SDI", "096770.KS": "SK이노베이션", "030200.KS": "KT", "000640.KS": "동아쏘시오홀딩스",
         "001040.KS": "CJ", "011780.KS": "금호석유", "009830.KS": "한화솔루션", "000120.KS": "대한통운",
         "004170.KS": "신세계", "008770.KS": "호텔신라", "005935.KS": "삼성전자우", "018260.KS": "삼성에스디에스",
+        "000080.KS": "하이트진로", "000150.KS": "두산", "000210.KS": "DL", "000240.KS": "한국앤컴퍼니",
+        "000670.KS": "영풍", "000880.KS": "한화", "000990.KS": "DB하이텍", "001230.KS": "동국제강",
+        "001430.KS": "세아베스틸지주", "001450.KS": "현대해상", "001740.KS": "SK네트웍스", "002380.KS": "KCC",
+        "003410.KS": "쌍용C&E", "003490.KS": "대한항공", "004370.KS": "농심", "004990.KS": "롯데지주",
+        "005830.KS": "DB손해보험", "006260.KS": "LS", "006360.KS": "GS건설", "007070.KS": "GS리테일",
+        "008930.KS": "한미사이언스", "009240.KS": "한샘", "010060.KS": "OCI홀딩스", "010120.KS": "LS ELECTRIC",
+        "010140.KS": "삼성중공업", "010620.KS": "현대미포조선", "011210.KS": "현대위아", "012450.KS": "한화에어로스페이스",
+        "012750.KS": "에스원", "016380.KS": "KG스틸", "020150.KS": "일진머티리얼즈", "021240.KS": "코웨이",
+        "023530.KS": "롯데쇼핑", "024110.KS": "기업은행", "028050.KS": "삼성엔지니어링", "028670.KS": "팬오션",
+        "032830.KS": "삼성생명", "033780.KS": "KT&G", "034020.KS": "두산에너빌리티", "035250.KS": "강원랜드",
+        "036460.KS": "한국가스공사", "047040.KS": "대우건설", "047050.KS": "포스코인터내셔널", "051900.KS": "LG생활건강",
+        "071050.KS": "한국금융지주", "086280.KS": "현대글로비스", "090430.KS": "아모레퍼시픽", "097950.KS": "CJ제일제당",
+        "128940.KS": "한미약품", "138040.KS": "메리츠금융지주",
 
         # --- KOSDAQ 상위 및 주요주 ---
         "247540.KQ": "에코프로비엠", "086520.KQ": "에코프로", "091990.KQ": "셀트리온헬스케어", "066970.KQ": "엘앤에프",
@@ -45,26 +58,39 @@ def get_broad_market_tickers():
     }
     return ticker_map
 
+def detect_fvg(df):
+    """최근 3개 캔들에서 Fair Value Gap(FVG)을 감지합니다."""
+    # Bullish FVG: 1번 캔들 고가 < 3번 캔들 저가
+    if len(df) < 3: return None
+    c1, c2, c3 = df.iloc[-3], df.iloc[-2], df.iloc[-1]
+    
+    if c1['High'] < c3['Low']:
+        return f"Bullish FVG (Gap: {int(c3['Low'] - c1['High']):,}원)"
+    elif c1['Low'] > c3['High']:
+        return f"Bearish FVG (Gap: {int(c1['Low'] - c3['High']):,}원)"
+    return None
+
 def send_msg(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
 
-def run_broad_scanner():
+def run_fvg_scanner():
     ticker_dict = get_broad_market_tickers()
     tickers = list(ticker_dict.keys())
     
-    print(f"🚀 총 {len(tickers)}개 종목 전수 조사 시작...")
+    print(f"🚀 코스피 150개 포함 총 {len(tickers)}개 종목 전수 조사 시작...")
     
-    # 일괄 다운로드 (Thread 활용)
-    all_data = yf.download(tickers, period="60d", interval="1d", group_by='ticker', threads=True, progress=False)
+    # [성능 최적화] 대량 다운로드
+    all_data = yf.download(tickers, period="65d", interval="1d", group_by='ticker', threads=True, progress=False)
     
     found_signals = []
     
     for ticker in tickers:
         try:
             df = all_data[ticker].dropna()
-            if len(df) < 35: continue
+            if len(df) < 40: continue
 
+            # 지표 계산
             df['RSI'] = ta.rsi(df['Close'], length=14)
             df['EMA60'] = ta.ema(df['Close'], length=60)
             macd = ta.macd(df['Close'])
@@ -74,20 +100,35 @@ def run_broad_scanner():
             curr = df.iloc[-1]
             prev = df.iloc[-2]
             name = ticker_dict.get(ticker, ticker)
+            
+            # FVG 감지 추가
+            fvg_status = detect_fvg(df)
 
-            # 타점: EMA60 위 + MACD 골든크로스
-            if curr['Close'] > curr['EMA60'] and prev['MACD'] < prev['MACD_S'] and curr['MACD'] > curr['MACD_S']:
+            # 타점 조건: EMA60 위 + MACD 골든크로스 (SMC 기본 전략)
+            is_smc_signal = curr['Close'] > curr['EMA60'] and prev['MACD'] < prev['MACD_S'] and curr['MACD'] > curr['MACD_S']
+            
+            # 신호가 하나라도 있으면 알림 대상
+            if is_smc_signal or fvg_status:
                 rsi_val = round(float(curr['RSI']), 2)
-                found_signals.append(f"✅ *종목*: {name}\n   *현재가*: {int(curr['Close']):,}원\n   *RSI*: {rsi_val}\n   *SMC*: 타점 포착 🚀")
+                smc_txt = "터짐 🚀" if is_smc_signal else "대기 중"
+                fvg_txt = fvg_status if fvg_status else "없음"
+                
+                found_signals.append(
+                    f"✅ *종목*: {name}\n"
+                    f"   *현재가*: {int(curr['Close']):,}원\n"
+                    f"   *RSI*: {rsi_val}\n"
+                    f"   *SMC*: {smc_txt}\n"
+                    f"   *FVG*: {fvg_txt}"
+                )
         except:
             continue
 
     if found_signals:
-        for i in range(0, len(found_signals), 5):
+        for i in range(0, len(found_signals), 5): # 5개씩 묶어서 전송
             send_msg("\n\n".join(found_signals[i:i+5]))
-        print(f"알람 {len(found_signals)}건 전송 완료")
+        print(f"총 {len(found_signals)}건 알람 전송 완료")
     else:
-        print("현재 타점 발생 종목 없음")
+        print("조건 만족 종목 없음")
 
 if __name__ == "__main__":
-    run_broad_scanner()
+    run_fvg_scanner()
