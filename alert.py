@@ -38,7 +38,7 @@ def get_broad_market_tickers():
         "071050.KS": "한국금융지주", "086280.KS": "현대글로비스", "090430.KS": "아모레퍼시픽", "097950.KS": "CJ제일제당",
         "128940.KS": "한미약품", "138040.KS": "메리츠금융지주",
 
-        # --- KOSDAQ 상위 및 주요주 (수정 완료) ---
+        # --- KOSDAQ 상위 및 주요주 ---
         "247540.KQ": "에코프로비엠", "086520.KQ": "에코프로", "066970.KS": "엘앤에프",
         "293480.KQ": "카카오게임즈", "028300.KQ": "HLB", "112040.KQ": "위메이드", "035900.KQ": "JYP Ent.",
         "214150.KQ": "클래시스", "058470.KQ": "리노공업", "145020.KQ": "휴젤", "067160.KQ": "메디톡스",
@@ -61,27 +61,25 @@ def detect_fvg(df):
         return f"Bearish FVG (Gap: {int(c1['Low'] - c3['High']):,}원)"
     return None
 
-def send_msg(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
-    
 def calculate_rsi(df, period=14):
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
     return round(100 - (100 / (1 + rs)).iloc[-1], 2)
-    
+
+def send_msg(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
+
 def run_fvg_scanner():
     ticker_dict = get_broad_market_tickers()
-    # 에러 났던 종목들만 제외 (Noise 제거)
     error_tickers = ['036490.KS', '010620.KS', '032670.KS', '030190.KQ']
     tickers = [t for t in ticker_dict.keys() if t not in error_tickers]
     
-    print(f"🚀 공격적 매수 모드! 총 {len(tickers)}개 종목 전수 조사 시작...")
+    print(f"🚀 비대칭 전략 모드 시작! (매수 완화 / 매도 강화)")
     
     all_data = yf.download(tickers, period="65d", interval="1d", group_by='ticker', threads=True, progress=False)
-    
     found_signals = []
     
     for ticker in tickers:
@@ -92,48 +90,38 @@ def run_fvg_scanner():
             name = ticker_dict.get(ticker, ticker)
             curr = df.iloc[-1]
             
-            # --- [데이터 계산] ---
-            rsi_val = calculate_rsi(df) 
+            # --- 지표 계산 로직 ---
+            rsi_val = calculate_rsi(df)
             fvg_status = detect_fvg(df)
             
-            # 1. EMA 60 (장기 추세)
-            ema60 = df['Close'].ewm(span=60, adjust=False).mean().iloc[-1]
-            
-            # 2. MACD (공격적 수정: 교차 지점이 아니라 '유지'여부 확인)
             exp1 = df['Close'].ewm(span=12, adjust=False).mean()
             exp2 = df['Close'].ewm(span=26, adjust=False).mean()
             macd = exp1 - exp2
             signal = macd.ewm(span=9, adjust=False).mean()
 
-            # --- [정밀 필터링: 10개 내외 타겟] ---
+            # --- [비대칭 필터링] ---
+            # 매수(완화): MACD 골든크로스 상태 유지 + RSI 65 이하 OR Bullish FVG
+            is_relaxed_buy = (macd.iloc[-1] > signal.iloc[-1] and rsi_val <= 65) or \
+                             ("Bullish" in str(fvg_status))
             
-            # 1. 매수 신호 (강력한 근거가 있을 때만)
-            # 조건: (오늘 딱 MACD 골든크로스 발생 AND RSI 60 이하) OR (RSI 40 이하 AND Bullish FVG 발생)
-            is_strict_gold_cross = (macd.iloc[-2] < signal.iloc[-2]) and (macd.iloc[-1] > signal.iloc[-1])
-            
-            is_strong_buy = (is_strict_gold_cross and rsi_val <= 60) or \
-                            (rsi_val <= 40 and "Bullish" in str(fvg_status))
-            
-            # 2. 매도 신호 (이전과 동일하게 엄격하게)
-            # 조건: RSI 80 이상 과열 OR Bearish FVG 발생
-            is_strong_sell = (rsi_val >= 80) or ("Bearish" in str(fvg_status))
+            # 매도(강화): RSI 80 초과 AND Bearish FVG 동시 발생 (쌍방 검증)
+            is_strict_sell = (rsi_val > 80) and ("Bearish" in str(fvg_status))
 
-            if is_strong_buy:
-                buy_type = "골든크로스(추세시작) 🚀" if is_strict_gold_cross else "SMC 바닥 눌림목 🎯"
+            if is_strict_sell:
+                found_signals.append(
+                    f"❄️ *[확정 매도]*: {name}({ticker})\n"
+                    f"   *현재가*: {int(curr['Close']):,}원\n"
+                    f"   *구분*: 강력 과열 및 하락 확정 ⚠️\n"
+                    f"   *RSI*: {rsi_val}\n"
+                    f"   *FVG*: {fvg_status}"
+                )
+            
+            elif is_relaxed_buy:
+                buy_type = "추세 상승 유지 📈" if (macd.iloc[-1] > signal.iloc[-1]) else "SMC 바닥 지지 🎯"
                 found_signals.append(
                     f"🔥 *[매수 추천]*: {name}({ticker})\n"
                     f"   *현재가*: {int(curr['Close']):,}원\n"
                     f"   *구분*: {buy_type}\n"
-                    f"   *RSI*: {rsi_val}\n"
-                    f"   *FVG*: {fvg_status if fvg_status else '없음'}"
-                )
-            
-            elif is_strong_sell:
-                sell_type = "RSI 과열 ❄️" if rsi_val >= 80 else "하락 FVG 발생 ⚠️"
-                found_signals.append(
-                    f"❄️ *[매도 추천]*: {name}({ticker})\n"
-                    f"   *현재가*: {int(curr['Close']):,}원\n"
-                    f"   *구분*: {sell_type}\n"
                     f"   *RSI*: {rsi_val}\n"
                     f"   *FVG*: {fvg_status if fvg_status else '없음'}"
                 )
@@ -142,12 +130,11 @@ def run_fvg_scanner():
             continue
 
     if found_signals:
-        # 5개씩 끊어서 텔레그램으로 전송 (메시지 길이 제한 방지)
         for i in range(0, len(found_signals), 5):
             send_msg("\n\n".join(found_signals[i:i+5]))
-        print(f"✅ 총 {len(found_signals)}건의 공격적 매수/관망 신호 전송 완료!")
+        print(f"✅ 총 {len(found_signals)}건의 신호 전송 완료!")
     else:
-        print("🔍 현재 조건(공격적 모드)을 만족하는 종목이 없습니다.")
+        print("🔍 현재 조건을 만족하는 종목이 없습니다.")
 
 if __name__ == "__main__":
     run_fvg_scanner()
