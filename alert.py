@@ -108,13 +108,14 @@ def run_fvg_scanner():
             is_smc_signal = curr['Close'] > curr['EMA60'] and prev['MACD'] < prev['MACD_S'] and curr['MACD'] > curr['MACD_S']
             smc_txt = "SMC 돌파 🚀" if is_smc_signal else "대기 중"
 
-            # 3. 필터링 로직 (사야 해! vs 팔아야 해!)
-            # [사야 해! 🔥] SMC 타점 OR (과매도 35이하 AND 상승 FVG)
-            is_buy_signal = is_smc_signal or (rsi_val <= 35 and "Bullish" in str(fvg_status))
+            # 1. 매수 신호: 추세도 좋은데(SMC) + 가격도 적당해야 함 (RSI 65 미만일 때만!)
+            # 또는 완전 바닥(RSI 35 이하)에서 세력 수급(Bullish FVG)이 들어올 때
+            is_buy_signal = (is_smc_signal and rsi_val < 65) or (rsi_val <= 35 and "Bullish" in str(fvg_status))
             
-            # [팔아야 해! ❄️] 과열(RSI 70이상) OR 하락 FVG 발생
-            is_sell_signal = (rsi_val >= 70) or ("Bearish" in str(fvg_status))
-
+            # 2. 매도 신호: 단순히 RSI 높다고 쏘지 말고, '하락 징조(Bearish FVG)'가 동반될 때만!
+            # 또는 RSI가 극도로 과열(80 이상) 되었을 때만 알람
+            is_sell_signal = (rsi_val >= 80) or (rsi_val >= 70 and "Bearish" in str(fvg_status))
+      
             # 4. 알람 생성
             if is_buy_signal:
                 # SMC가 터진 건지, 단순 바닥 반등인지 태그 정리
