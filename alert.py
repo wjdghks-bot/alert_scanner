@@ -108,13 +108,15 @@ def run_fvg_scanner():
             is_smc_signal = curr['Close'] > curr['EMA60'] and prev['MACD'] < prev['MACD_S'] and curr['MACD'] > curr['MACD_S']
             smc_txt = "SMC 돌파 🚀" if is_smc_signal else "대기 중"
 
-            # 1. 매수 신호: 추세도 좋은데(SMC) + 가격도 적당해야 함 (RSI 65 미만일 때만!)
-            # 또는 완전 바닥(RSI 35 이하)에서 세력 수급(Bullish FVG)이 들어올 때
-            is_buy_signal = (is_smc_signal and rsi_val < 65) or (rsi_val <= 35 and "Bullish" in str(fvg_status))
+            # 1. 매수 신호 (Buy): 
+            # - SMC(추세): RSI가 75 미만이기만 하면(완전 꼭대기만 아니면) 추세 돌파 시 무조건 알람
+            # - FVG(눌림목): RSI 45 이하에서 상승 FVG 발생 시 "공격적 저점 매수"로 판단
+            is_buy_signal = (is_smc_signal and rsi_val < 75) or (rsi_val <= 45 and "Bullish" in str(fvg_status))
             
-            # 2. 매도 신호: 단순히 RSI 높다고 쏘지 말고, '하락 징조(Bearish FVG)'가 동반될 때만!
-            # 또는 RSI가 극도로 과열(80 이상) 되었을 때만 알람
-            is_sell_signal = (rsi_val >= 80) or (rsi_val >= 70 and "Bearish" in str(fvg_status))
+            # 2. 매도 신호 (Sell): 
+            # - 매수를 공격적으로 하므로, 매도는 조금 더 버틸 수 있게 기준을 상향 (RSI 85 이상)
+            # - 혹은 하락 FVG(세력 이탈)가 확실히 보일 때만 알람
+            is_sell_signal = (rsi_val >= 85) or ("Bearish" in str(fvg_status))
       
             # 4. 알람 생성
             if is_buy_signal:
