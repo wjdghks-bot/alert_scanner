@@ -109,9 +109,6 @@ def run_fvg_scanner():
             
             # 3. 매도 추천 (Sell): RSI 80 초과 + Bearish FVG 발생 (탈출 신호)
             is_sell = (rsi_val > 80) and ("Bearish" in str(fvg_status))
-            
-            # 4. 관망 (Watch): 위 조건엔 안 맞지만 변동성이 생길 수 있는 구간 (RSI 과열 조짐 등)
-            is_watch = (rsi_val >= 70 and not is_sell) or (rsi_val <= 35 and not is_buy)
 
             if is_strong_buy:
                 found_signals.append(
@@ -134,13 +131,6 @@ def run_fvg_scanner():
                     f"   *RSI*: {rsi_val} / *FVG*: {fvg_status}"
                 )
 
-            elif is_watch:
-                status = "과열 조짐 🟡" if rsi_val >= 70 else "과매도 구간 🔵"
-                found_signals.append(
-                    f"👀 *[관망]*: {name}({ticker})\n"
-                    f"   *상태*: {status}\n"
-                    f"   *RSI*: {rsi_val}"
-                )
                 
         except Exception:
             continue
