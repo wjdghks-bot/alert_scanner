@@ -104,40 +104,38 @@ def run_fvg_scanner():
             exp2 = df['Close'].ewm(span=26, adjust=False).mean()
             macd = exp1 - exp2
             signal = macd.ewm(span=9, adjust=False).mean()
-            
-            # [공격적 매수 포인트] MACD가 Signal 위에만 있으면 추세 살아있다고 판단
-            is_macd_above = macd.iloc[-1] > signal.iloc[-1]
-            # [기존 타점] 오늘 딱 골든크로스인 경우 (별도 표시용)
-            is_just_crossed = (macd.iloc[-2] < signal.iloc[-2]) and (macd.iloc[-1] > signal.iloc[-1])
-            
-            # --- [공격적 필터링 로직] ---
-            display_ticker = ticker.lower()
 
-            # A. 공격적 추세 매수: 60일선 위 + MACD 정배열 + RSI 80까지 허용 (기존 75에서 상향)
-            is_aggressive_buy = (curr['Close'] > ema60) and is_macd_above and (rsi_val < 80)
+            # --- [정밀 필터링: 10개 내외 타겟] ---
             
-            # B. 적극적 눌림목 매수: Bullish FVG 발생 + RSI 50 이하 (과매도 탈출)
-            is_dip_buy = ("Bullish" in str(fvg_status)) and (rsi_val <= 50)
+            # 1. 매수 신호 (강력한 근거가 있을 때만)
+            # 조건: (오늘 딱 MACD 골든크로스 발생 AND RSI 60 이하) OR (RSI 40 이하 AND Bullish FVG 발생)
+            is_strict_gold_cross = (macd.iloc[-2] < signal.iloc[-2]) and (macd.iloc[-1] > signal.iloc[-1])
+            
+            is_strong_buy = (is_strict_gold_cross and rsi_val <= 60) or \
+                            (rsi_val <= 40 and "Bullish" in str(fvg_status))
+            
+            # 2. 매도 신호 (이전과 동일하게 엄격하게)
+            # 조건: RSI 80 이상 과열 OR Bearish FVG 발생
+            is_strong_sell = (rsi_val >= 80) or ("Bearish" in str(fvg_status))
 
-            if is_aggressive_buy or is_dip_buy:
-                buy_type = "추세 지속 중 🔥" if not is_just_crossed else "오늘 골든크로스 발생 🚀"
-                if is_dip_buy: buy_type = "SMC 눌림목 타점 🎯"
-                
+            if is_strong_buy:
+                buy_type = "골든크로스(추세시작) 🚀" if is_strict_gold_cross else "SMC 바닥 눌림목 🎯"
                 found_signals.append(
-                    f"🔥 *[매수 추천]*: {name}({display_ticker})\n"
+                    f"🔥 *[매수 추천]*: {name}({ticker})\n"
                     f"   *현재가*: {int(curr['Close']):,}원\n"
                     f"   *구분*: {buy_type}\n"
                     f"   *RSI*: {rsi_val}\n"
                     f"   *FVG*: {fvg_status if fvg_status else '없음'}"
                 )
             
-            # C. 관망: 추세는 살아있는데 RSI가 80 넘어서 과열된 경우
-            elif (curr['Close'] > ema60) and is_macd_above and (rsi_val >= 80):
+            elif is_strong_sell:
+                sell_type = "RSI 과열 ❄️" if rsi_val >= 80 else "하락 FVG 발생 ⚠️"
                 found_signals.append(
-                    f"🚦 *[관망]*: {name}({display_ticker})\n"
+                    f"❄️ *[매도 추천]*: {name}({ticker})\n"
                     f"   *현재가*: {int(curr['Close']):,}원\n"
-                    f"   *구분*: 과열 구간 진입 (RSI {rsi_val})\n"
-                    f"   *비고*: 조정 시 매수 검토"
+                    f"   *구분*: {sell_type}\n"
+                    f"   *RSI*: {rsi_val}\n"
+                    f"   *FVG*: {fvg_status if fvg_status else '없음'}"
                 )
                 
         except Exception:
