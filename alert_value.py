@@ -98,7 +98,10 @@ def run_value_scanner():
             send_msg("\n\n".join(found_value_stocks[i:i+5]))
         print(f"✅ 가치주 {len(found_value_stocks)}건 전송 완료")
     else:
-        print("🔍 조건에 맞는 가치주가 없습니다.")
+        # 조건에 맞는 종목이 없을 때 알람 발송
+        no_result_text = f"🔍 *[{now_str}] 재무 스캐너 실행 완료*\n\n현재 PBR < 1.3 및 PER < 15 조건을 만족하는 가치주가 없습니다."
+        send_msg(no_result_text)
+        print("🔍 조건에 맞는 가치주가 없어 알람을 보냈습니다.")
 
 if __name__ == "__main__":
     run_value_scanner()
