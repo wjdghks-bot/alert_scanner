@@ -91,9 +91,11 @@ def run_value_scanner():
         except Exception as e:
             print(f"Error scanning {name}: {e}")
             continue
-
+    from datetime import datetime
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+    
     if found_value_stocks:
-        send_msg("📢 **[재무 분석 결과] 현재 저평가된 우량주 리스트**")
+        send_msg(f"📢 **[재무 분석 결과 - {now_str}] 현재 저평가된 우량주 리스트**")
         for i in range(0, len(found_value_stocks), 5):
             send_msg("\n\n".join(found_value_stocks[i:i+5]))
         print(f"✅ 가치주 {len(found_value_stocks)}건 전송 완료")
