@@ -103,16 +103,20 @@ def run_fvg_scanner():
             # 1. 매수 강추천 (Strong Buy): MACD 골든크로스 + Bullish FVG (신뢰도 최상)
             is_strong_buy = (macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]) and \
                             ("Bullish" in str(fvg_status))
-            
             # 2. 매수 추천 (Buy): MACD 상승 추세 유지 + RSI 50 이하 (눌림목/저평가)
             is_buy = (macd.iloc[-1] > signal.iloc[-1] and rsi_val <= 50) and not is_strong_buy
-            
             # 3. 매도 추천 (Sell): RSI 80 초과 + Bearish FVG 발생 (탈출 신호)
             is_sell = (rsi_val > 70) and ("Bearish" in str(fvg_status))
+            
+            curr_price = int(df['Close'].iloc[-1])
+            prev_price = int(df['Close'].iloc[-2])
+            change_pct = round(((curr_price - prev_price) / prev_price) * 100, 2)
+            change_str = f"({'+' if change_pct > 0 else ''}{change_pct}%)"
 
             if is_strong_buy:
                 found_signals.append(
                     f"🚀 *[매수 강추천]*: {name}({ticker})\n"
+                    f"   *현재가*: {curr_price:,}원 {change_str}\n"
                     f"   *구분*: 골든크로스 + SMC 지지 확인 🎯\n"
                     f"   *RSI*: {rsi_val} / *FVG*: {fvg_status}"
                 )
@@ -120,6 +124,7 @@ def run_fvg_scanner():
             elif is_buy:
                 found_signals.append(
                     f"🔥 *[매수 추천]*: {name}({ticker})\n"
+                    f"   *현재가*: {curr_price:,}원 {change_str}\n"
                     f"   *구분*: 저평가 구간 추세 상승 📈\n"
                     f"   *RSI*: {rsi_val} / *FVG*: {fvg_status if fvg_status else '없음'}"
                 )
@@ -127,6 +132,7 @@ def run_fvg_scanner():
             elif is_sell:
                 found_signals.append(
                     f"❄️ *[매도 추천]*: {name}({ticker})\n"
+                    f"   *현재가*: {curr_price:,}원 {change_str}\n"
                     f"   *구분*: 강력 과열 및 하락 징후 ⚠️\n"
                     f"   *RSI*: {rsi_val} / *FVG*: {fvg_status}"
                 )
@@ -139,7 +145,7 @@ def run_fvg_scanner():
         for i in range(0, len(found_signals), 5):
             send_msg("\n\n".join(found_signals[i:i+5]))
         print(f"✅ 총 {len(found_signals)}건의 신호 전송 완료!")
-    )else:
+    else:
         # 결과가 없을 때도 텔레그램으로 알림 전송
         from datetime import datetime
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
