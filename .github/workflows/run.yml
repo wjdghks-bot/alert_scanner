@@ -2,29 +2,38 @@ name: Stock Scanner Auto Run
 
 on:
   schedule:
-    # 한국 시간 기준 (월~금 09:10, 10:30, 13:30, 15:10)
-    - cron: '10 0 * * 1-5'
-    - cron: '30 1 * * 1-5'
-    - cron: '30 4 * * 1-5'
-    - cron: '10 6 * * 1-5'
-  workflow_dispatch: # 수동 실행 버튼 추가
+    # GitHub Actions의 지연(Delay)을 고려하여 5분씩 앞당겨 설정 (UTC 기준)
+    # 00:05 (09:05 KST), 01:25 (10:25 KST), 04:25 (13:25 KST), 06:05 (15:05 KST)
+    - cron: '5 0 * * 1-5'
+    - cron: '25 1 * * 1-5'
+    - cron: '25 4 * * 1-5'
+    - cron: '5 6 * * 1-5'
+  workflow_dispatch: # 문제가 생겼을 때 바로 누를 수 있는 수동 버튼
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
+          cache: 'pip' # 패키지 설치 속도를 높이기 위한 캐시 추가
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Run All Scanners
         env:
+          # Settings > Secrets > Actions에 등록된 값 호출
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        # 여러 줄의 명령어를 실행할 때는 아래와 같이 '|'를 사용합니다.
+          PYTHONIOENCODING: "utf-8" # 한글 깨짐 방지
         run: |
+          # 각 스크립트 실행 (에러가 나도 다음 스크립트가 돌도록 설정 가능)
           python alert.py
           python alert_value.py
