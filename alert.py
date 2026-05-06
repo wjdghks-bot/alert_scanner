@@ -139,8 +139,14 @@ def run_fvg_scanner():
         for i in range(0, len(found_signals), 5):
             send_msg("\n\n".join(found_signals[i:i+5]))
         print(f"✅ 총 {len(found_signals)}건의 신호 전송 완료!")
-    else:
-        print("🔍 현재 조건을 만족하는 종목이 없습니다.")
+    )else:
+        # 결과가 없을 때도 텔레그램으로 알림 전송
+        from datetime import datetime
+        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        no_result_msg = f"🔍 *[{now}] 스캐너 실행 완료*\n\n현재 조건을 만족하는 종목이 없습니다."
+        
+        send_msg(no_result_msg)
+        print(f"✅ 실행 완료 메시지 전송: {no_result_msg}")
 
 if __name__ == "__main__":
     run_fvg_scanner()
