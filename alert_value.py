@@ -11,18 +11,22 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
 def check_time_and_run():
-    # 한국 시간 설정
+    # 1. 실행 경로 확인 (스케줄 실행인지, 수동 실행인지)
+    # GitHub Actions에서 실행될 때만 GITHUB_EVENT_NAME 변수가 존재합니다.
+    event_name = os.getenv('GITHUB_EVENT_NAME', 'manual') 
+    
     kst = ZoneInfo("Asia/Seoul")
     now_kst = datetime.datetime.now(kst)
-    
-    # 현재 시간을 "YYYY-MM-DD HH:MM" 형식으로 저장
     full_time_str = now_kst.strftime("%Y-%m-%d %H:%M")
     
-    # [핵심] 오후 4시(16:00) 이후라면 지연 실행으로 간주하고 즉시 종료
-    if now_kst.hour >= 16:
-        print(f"[{full_time_str}] 장 마감 후 지연 실행 방지를 위해 종료합니다.")
-        sys.exit(0)
+    # 2. [조건 수정] 'schedule' 이벤트일 때만 시간 체크 수행
+    if event_name == 'schedule':
+        if now_kst.hour >= 16:
+            print(f"[{full_time_str}] 스케줄러 지연 실행 방지를 위해 종료합니다.")
+            sys.exit(0)
     
+    # 수동 실행(workflow_dispatch)이거나 로컬 실행이면 시간 상관없이 통과
+    print(f"[{full_time_str}] 스캐너를 시작합니다. (실행 모드: {event_name})")
     return full_time_str
 
 # 1. 실행 시간 체크 (여기서 16시 이후면 컷!)
