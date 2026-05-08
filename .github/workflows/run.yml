@@ -7,6 +7,10 @@ on:
     - cron: '22 10 * * *'
     - cron: '07 13 * * *'
     - cron: '02 15 * * *'
+    - cron: '03 0 * * *'  # 09:03 KST
+    - cron: '22 1 * * *'  # 10:22 KST
+    - cron: '07 4 * * *'  # 13:07 KST
+    - cron: '02 6 * * *'  # 15:02 KST
   workflow_dispatch: 
 
 jobs:
