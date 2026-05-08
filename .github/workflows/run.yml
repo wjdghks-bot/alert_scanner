@@ -34,5 +34,4 @@ jobs:
           TZ: "Asia/Seoul" # 시스템 타임존을 한국으로 설정
           GITHUB_EVENT_NAME: ${{ github.event_name }} # 필수!
         run: |
-          python alert.py
-          python alert_value.py
+          python alert.py && python alert_value.py
