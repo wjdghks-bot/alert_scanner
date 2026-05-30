@@ -1,123 +1,361 @@
-import yfinance as yf
-import pandas as pd
-import requests
+import datetime as dt
 import os
-import datetime  # 추가
-import sys       # 추가
+import sys
+from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
-# 1. 환경 설정
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+import pandas as pd
+import requests
+import yfinance as yf
 
-def check_time_and_run():
-    # 1. 실행 경로 확인 (스케줄 실행인지, 수동 실행인지)
-    # GitHub Actions에서 실행될 때만 GITHUB_EVENT_NAME 변수가 존재합니다.
-    event_name = os.getenv('GITHUB_EVENT_NAME', 'manual') 
-    
-    kst = ZoneInfo("Asia/Seoul")
-    now_kst = datetime.datetime.now(kst)
-    full_time_str = now_kst.strftime("%Y-%m-%d %H:%M")
-    
-    # 2. [조건 수정] 'schedule' 이벤트일 때만 시간 체크 수행
-    if event_name == 'schedule':
-        if now_kst.hour >= 16:
-            print(f"[{full_time_str}] 스케줄러 지연 실행 방지를 위해 종료합니다.")
-            sys.exit(0)
-    
-    # 수동 실행(workflow_dispatch)이거나 로컬 실행이면 시간 상관없이 통과
-    print(f"[{full_time_str}] 스캐너를 시작합니다. (실행 모드: {event_name})")
-    return full_time_str
 
-# 1. 실행 시간 체크 (여기서 16시 이후면 컷!)
-current_time = check_time_and_run()
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
-def get_target_tickers():
-    return {
-        "005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "005380.KS": "현대차", "035420.KS": "NAVER",
-        "000270.KS": "기아", "005490.KS": "POSCO홀딩스", "035720.KS": "카카오", "068270.KS": "셀트리온",
-        "051910.KS": "LG화학", "105560.KS": "KB금융", "055550.KS": "신한지주", "000810.KS": "삼성화재",
-        "012330.KS": "현대모비스", "066570.KS": "LG전자", "003550.KS": "LG", "034730.KS": "SK",
-        "015760.KS": "한국전력", "033780.KS": "KT&G", "009150.KS": "삼성전기", "010130.KS": "고려아연",
-        "017670.KS": "SK텔레콤", "032640.KS": "LG유플러스", "011070.KS": "LG이노텍", "016360.KS": "삼성증권",
-        "000100.KS": "유한양행", "000720.KS": "현대건설", "028260.KS": "삼성물산", "036570.KS": "엔씨소프트",
-        "009540.KS": "HD현대중공업", "010950.KS": "S-Oil", "011170.KS": "롯데케미칼", "004020.KS": "현대제철",
-        "316140.KS": "우리금융지주", "034220.KS": "LG디스플레이", "003670.KS": "포스코퓨처엠", "086790.KS": "하나금융지주",
-        "323410.KS": "카카오뱅크", "377300.KS": "카카오페이", "302440.KS": "SK바이오사이언스", "259960.KS": "크래프톤",
-        "006400.KS": "삼성SDI", "096770.KS": "SK이노베이션", "030200.KS": "KT", "000640.KS": "동아쏘시오홀딩스",
-        "001040.KS": "CJ", "011780.KS": "금호석유", "009830.KS": "한화솔루션", "000120.KS": "대한통운",
-        "004170.KS": "신세계", "008770.KS": "호텔신라", "005935.KS": "삼성전자우", "018260.KS": "삼성에스디에스",
-        "000080.KS": "하이트진로", "000150.KS": "두산", "000210.KS": "DL", "000240.KS": "한국앤컴퍼니",
-        "000670.KS": "영풍", "000880.KS": "한화", "000990.KS": "DB하이텍", "001230.KS": "동국제강",
-        "001430.KS": "세아베스틸지주", "001450.KS": "현대해상", "001740.KS": "SK네트웍스", "002380.KS": "KCC",
-        "003490.KS": "대한항공", "004370.KS": "농심", "004990.KS": "롯데지주",
-        "005830.KS": "DB손해보험", "006260.KS": "LS", "006360.KS": "GS건설", "007070.KS": "GS리테일",
-        "008930.KS": "한미사이언스", "009240.KS": "한샘", "010060.KS": "OCI홀딩스", "010120.KS": "LS ELECTRIC",
-        "010140.KS": "삼성중공업", "011210.KS": "현대위아", "012450.KS": "한화에어로스페이스",
-        "012750.KS": "에스원", "016380.KS": "KG스틸", "020150.KS": "일진머티리얼즈", "021240.KS": "코웨이",
-        "023530.KS": "롯데쇼핑", "024110.KS": "기업은행", "028050.KS": "삼성엔지니어링", "028670.KS": "팬오션",
-        "032830.KS": "삼성생명", "033780.KS": "KT&G", "034020.KS": "두산에너빌리티", "035250.KS": "강원랜드",
-        "036460.KS": "한국가스공사", "047040.KS": "대우건설", "047050.KS": "포스코인터내셔널", "051900.KS": "LG생활건강",
-        "071050.KS": "한국금융지주", "086280.KS": "현대글로비스", "090430.KS": "아모레퍼시픽", "097950.KS": "CJ제일제당",
-        "128940.KS": "한미약품", "138040.KS": "메리츠금융지주",
 
-        # --- KOSDAQ 상위 및 주요주 ---
-        "247540.KQ": "에코프로비엠", "086520.KQ": "에코프로", "066970.KS": "엘앤에프",
-        "293480.KQ": "카카오게임즈", "028300.KQ": "HLB", "112040.KQ": "위메이드", "035900.KQ": "JYP Ent.",
-        "214150.KQ": "클래시스", "058470.KQ": "리노공업", "145020.KQ": "휴젤", "067160.KQ": "메디톡스",
-        "036830.KQ": "솔브레인", "039030.KQ": "이오테크닉스", "041510.KQ": "에스엠", "095700.KQ": "제넥신",
-        "069080.KQ": "웹젠", "035600.KQ": "KG이니시스", "060250.KQ": "NHN KCP",
-        "253450.KQ": "스튜디오드래곤", "056190.KQ": "에스에프에이", "025980.KQ": "아난티",
-        "000250.KQ": "삼천당제약", "064550.KQ": "바이오니아", "041190.KQ": "우리기술투자",
-        "086900.KQ": "메디포스트", "036200.KQ": "유진테크", "033640.KQ": "네패스", "023590.KQ": "다우기술",
-        "053030.KQ": "바이넥스", "042000.KQ": "카페24", "078340.KQ": "컴투스",
-        "084110.KQ": "휴온스", "098460.KQ": "고영"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
+EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
+KST = ZoneInfo("Asia/Seoul")
+
+
+@dataclass(frozen=True)
+class Config:
+    min_prev_volume_ratio: float = 1.8
+    min_prev_change_pct: float = 2.0
+    min_prev_close_position: float = 0.7
+    min_open_gap_pct: float = -4.0
+    max_open_gap_pct: float = 1.0
+    min_rebound_from_open_pct: float = 0.8
+    min_today_volume_vs_prev_pct: float = 3.0
+    min_score: int = 6
+    top_n: int = 12
+
+
+CONFIG = Config()
+
+
+TICKERS = {
+    "005930.KS": "SamsungElec",
+    "000660.KS": "SKHynix",
+    "005380.KS": "HyundaiMotor",
+    "000270.KS": "Kia",
+    "035420.KS": "NAVER",
+    "035720.KS": "Kakao",
+    "068270.KS": "Celltrion",
+    "005490.KS": "POSCOHoldings",
+    "051910.KS": "LGChem",
+    "006400.KS": "SamsungSDI",
+    "373220.KS": "LGEnergySolution",
+    "105560.KS": "KBFinancial",
+    "055550.KS": "Shinhan",
+    "086790.KS": "HanaFinancial",
+    "316140.KS": "WooriFinancial",
+    "012330.KS": "HyundaiMobis",
+    "028260.KS": "SamsungC&T",
+    "032830.KS": "SamsungLife",
+    "066570.KS": "LGElectronics",
+    "003550.KS": "LG",
+    "034730.KS": "SK",
+    "096770.KS": "SKInnovation",
+    "015760.KS": "KEPCO",
+    "033780.KS": "KT&G",
+    "017670.KS": "SKTelecom",
+    "030200.KS": "KT",
+    "009150.KS": "SamsungElecMech",
+    "010130.KS": "KoreaZinc",
+    "010950.KS": "SOil",
+    "011200.KS": "HMM",
+    "047050.KS": "POSCOIntl",
+    "042660.KS": "HanwhaOcean",
+    "009540.KS": "HDKSOE",
+    "329180.KS": "HDHyundaiHeavy",
+    "010140.KS": "SamsungHeavy",
+    "034020.KS": "DoosanEnerbility",
+    "012450.KS": "HanwhaAerospace",
+    "000720.KS": "HyundaiE&C",
+    "028050.KS": "SamsungE&A",
+    "051900.KS": "LGH&H",
+    "090430.KS": "AmorePacific",
+    "097950.KS": "CJCheilJedang",
+    "018260.KS": "SamsungSDS",
+    "036570.KS": "NCSOFT",
+    "259960.KS": "Krafton",
+    "302440.KS": "SKBioscience",
+    "326030.KS": "SKBiopharm",
+    "128940.KS": "HanmiPharm",
+    "011070.KS": "LGInnotek",
+    "034220.KS": "LGDisplay",
+    "004020.KS": "HyundaiSteel",
+    "006260.KS": "LS",
+    "010120.KS": "LSElectric",
+    "071050.KS": "KoreaInvestment",
+    "016360.KS": "SamsungSec",
+    "024110.KS": "IBK",
+    "000810.KS": "SamsungFire",
+    "005830.KS": "DBInsurance",
+    "138040.KS": "MeritzFinancial",
+    "247540.KQ": "EcoProBM",
+    "086520.KQ": "EcoPro",
+    "028300.KQ": "HLB",
+    "196170.KQ": "Alteogen",
+    "068760.KQ": "CelltrionPharm",
+    "145020.KQ": "Hugel",
+    "214150.KQ": "Classys",
+    "058470.KQ": "Leeno",
+    "112040.KQ": "Wemade",
+    "035900.KQ": "JYPEnt",
+    "041510.KQ": "SM",
+    "122870.KQ": "YGEnt",
+    "293490.KQ": "KakaoGames",
+    "263750.KQ": "PearlAbyss",
+    "067160.KQ": "Medytox",
+    "039030.KQ": "EO Technics",
+    "036830.KQ": "Soulbrain",
+    "095340.KQ": "ISC",
+    "240810.KQ": "WonikIPS",
+    "078340.KQ": "Com2uS",
+    "060250.KQ": "NHNKCP",
+    "035600.KQ": "KGInicis",
+    "000250.KQ": "Samchundang",
+    "084370.KQ": "EugeneTech",
+    "098460.KQ": "KohYoung",
+    "053030.KQ": "Binex",
+    "042000.KQ": "Cafe24",
+}
+
+
+def now_kst() -> dt.datetime:
+    return dt.datetime.now(KST)
+
+
+def send_telegram(text: str) -> None:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID. Printing only.")
+        print(text)
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    response = requests.post(
+        url,
+        json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+
+
+def get_ticker_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame | None:
+    if isinstance(data.columns, pd.MultiIndex):
+        if ticker not in data.columns.get_level_values(0):
+            return None
+        return data[ticker].dropna()
+    return data.dropna()
+
+
+def get_previous_session(daily: pd.DataFrame, today: dt.date) -> tuple[pd.Series, pd.Series] | None:
+    daily = daily.dropna().copy()
+    if daily.empty or len(daily) < 25:
+        return None
+    dates = pd.to_datetime(daily.index).date
+    before_today = daily[dates < today]
+    if len(before_today) < 25:
+        before_today = daily.iloc[:-1]
+    if len(before_today) < 25:
+        return None
+    return before_today.iloc[-1], before_today.iloc[-2]
+
+
+def today_minutes(intraday: pd.DataFrame, today: dt.date) -> pd.DataFrame:
+    if intraday.empty:
+        return intraday
+    index = pd.to_datetime(intraday.index)
+    if index.tz is None:
+        index = index.tz_localize("UTC").tz_convert(KST)
+    else:
+        index = index.tz_convert(KST)
+    df = intraday.copy()
+    df.index = index
+    return df[index.date == today].dropna()
+
+
+def pct(a: float, b: float) -> float:
+    return ((a - b) / b) * 100 if b else 0.0
+
+
+def analyze_one(
+    ticker: str,
+    name: str,
+    daily: pd.DataFrame,
+    intraday: pd.DataFrame,
+    today: dt.date,
+) -> dict | None:
+    previous = get_previous_session(daily, today)
+    if not previous:
+        return None
+
+    prev_day, prev_prev_day = previous
+    day_minutes = today_minutes(intraday, today)
+    if day_minutes.empty:
+        return None
+
+    prev_close = float(prev_day["Close"])
+    prev_high = float(prev_day["High"])
+    prev_low = float(prev_day["Low"])
+    prev_volume = float(prev_day["Volume"])
+    prev_change_pct = pct(prev_close, float(prev_prev_day["Close"]))
+
+    daily_before_today = daily[pd.to_datetime(daily.index).date < today]
+    vol20 = float(daily_before_today["Volume"].tail(20).mean())
+    ma20 = float(daily_before_today["Close"].tail(20).mean())
+    ma60 = float(daily_before_today["Close"].tail(60).mean())
+
+    open_price = float(day_minutes["Open"].iloc[0])
+    last_price = float(day_minutes["Close"].iloc[-1])
+    high_price = float(day_minutes["High"].max())
+    today_volume = float(day_minutes["Volume"].sum())
+
+    open_gap_pct = pct(open_price, prev_close)
+    rebound_from_open_pct = pct(last_price, open_price)
+    current_change_pct = pct(last_price, prev_close)
+    today_volume_vs_prev_pct = today_volume / max(prev_volume, 1) * 100
+    prev_volume_ratio = prev_volume / max(vol20, 1)
+    prev_close_position = (prev_close - prev_low) / max(prev_high - prev_low, 1)
+    near_today_high = last_price >= high_price * 0.985
+
+    checks = {
+        "prev_volume_spike": prev_volume_ratio >= CONFIG.min_prev_volume_ratio,
+        "prev_strong_up": prev_change_pct >= CONFIG.min_prev_change_pct,
+        "prev_close_near_high": prev_close_position >= CONFIG.min_prev_close_position,
+        "above_ma20": prev_close >= ma20,
+        "above_ma60": prev_close >= ma60,
+        "morning_gap_ok": CONFIG.min_open_gap_pct <= open_gap_pct <= CONFIG.max_open_gap_pct,
+        "rebound_from_open": rebound_from_open_pct >= CONFIG.min_rebound_from_open_pct,
+        "morning_volume_ok": today_volume_vs_prev_pct >= CONFIG.min_today_volume_vs_prev_pct,
+        "near_today_high": near_today_high,
     }
 
-def send_msg(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
+    required = checks["morning_gap_ok"] and checks["rebound_from_open"]
+    score = sum(checks.values())
+    if not required or score < CONFIG.min_score:
+        return None
 
-def run_value_scanner():
-    ticker_dict = get_target_tickers()
-    found_value_stocks = []
-    
-    print(f"💎 [{current_time}] 재무 기반 가치 퀀트 스캔 시작...")
+    return {
+        "ticker": ticker,
+        "name": name,
+        "score": score,
+        "prev_change_pct": prev_change_pct,
+        "prev_volume_ratio": prev_volume_ratio,
+        "prev_close_position": prev_close_position,
+        "open_gap_pct": open_gap_pct,
+        "rebound_from_open_pct": rebound_from_open_pct,
+        "current_change_pct": current_change_pct,
+        "today_volume_vs_prev_pct": today_volume_vs_prev_pct,
+        "last_price": last_price,
+        "near_today_high": near_today_high,
+        "checks": checks,
+    }
 
-    for ticker, name in ticker_dict.items():
+
+def format_signal(item: dict) -> str:
+    near_high = "yes" if item["near_today_high"] else "no"
+    return (
+        f"<b>{item['name']} ({item['ticker']})</b>\n"
+        f"score: <b>{item['score']}/9</b>\n"
+        f"price: {item['last_price']:,.0f} KRW ({item['current_change_pct']:+.2f}% vs prev close)\n"
+        f"open gap: {item['open_gap_pct']:+.2f}% / rebound: {item['rebound_from_open_pct']:+.2f}%\n"
+        f"prev day: {item['prev_change_pct']:+.2f}% / volume x{item['prev_volume_ratio']:.1f}\n"
+        f"today volume: {item['today_volume_vs_prev_pct']:.1f}% of prev day / near high: {near_high}"
+    )
+
+
+def scan() -> list[dict]:
+    tickers = list(TICKERS)
+    today = now_kst().date()
+
+    daily_all = yf.download(
+        tickers,
+        period="4mo",
+        interval="1d",
+        group_by="ticker",
+        auto_adjust=False,
+        threads=True,
+        progress=False,
+    )
+    intraday_all = yf.download(
+        tickers,
+        period="5d",
+        interval="1m",
+        group_by="ticker",
+        auto_adjust=False,
+        threads=True,
+        progress=False,
+    )
+
+    results = []
+    for ticker, name in TICKERS.items():
         try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            pbr = info.get('priceToBook')
-            per = info.get('forwardPE') or info.get('trailingPE')
-            debt_ratio = info.get('debtToEquity')
+            daily = get_ticker_frame(daily_all, ticker)
+            intraday = get_ticker_frame(intraday_all, ticker)
+            if daily is None or intraday is None:
+                continue
+            item = analyze_one(ticker, name, daily, intraday, today)
+            if item:
+                results.append(item)
+        except Exception as exc:
+            print(f"{ticker} failed: {exc}")
 
-            if pbr is not None and per is not None:
-                if pbr < 1.3 and per < 15:
-                    if debt_ratio and debt_ratio > 150:
-                        continue
-                
-                    found_value_stocks.append(
-                        f"💎 *[가치 저평가 발견]*: {name}({ticker})\n"
-                        f"   - PBR: {round(pbr, 2)} / PER: {round(per, 2)}\n"
-                        f"   - 현재가: {info.get('currentPrice', 0):,}원"
-                    )
-                
-        except Exception as e:
-            continue
+    return sorted(
+        results,
+        key=lambda x: (
+            x["score"],
+            x["rebound_from_open_pct"],
+            x["today_volume_vs_prev_pct"],
+        ),
+        reverse=True,
+    )[: CONFIG.top_n]
 
-    # 결과 전송 로직 (KST 시간인 current_time 사용)
-    if found_value_stocks:
-        send_msg(f"📢 **[재무 분석 결과 - {current_time}] 저평가 우량주**")
-        for i in range(0, len(found_value_stocks), 5):
-            send_msg("\n\n".join(found_value_stocks[i:i+5]))
-        print(f"✅ 가치주 {len(found_value_stocks)}건 전송 완료")
-    else:
-        # 조건에 맞는 종목이 없을 때도 한국 시간으로 알림
-        no_result_text = f"🔍 *[{current_time}] 재무 스캐너 실행 완료*\n\n현재 조건을 만족하는 가치주가 없습니다."
-        send_msg(no_result_text)
-        print("🔍 조건에 맞는 가치주가 없어 알람을 보냈습니다.")
+
+def main() -> int:
+    current = now_kst()
+    current_text = current.strftime("%Y-%m-%d %H:%M")
+    print(f"[{current_text}] morning rebound scanner started. event={EVENT_NAME}")
+
+    if EVENT_NAME == "schedule" and current.hour >= 16:
+        print("Market is closed. Scheduled run skipped.")
+        return 0
+
+    results = scan()
+    if not results:
+        send_telegram(
+            f"📭 <b>[{current_text}] Morning rebound scanner</b>\n\n"
+            "No candidates found.\n"
+            "Temporary yfinance version. Best run time: 09:30-09:45 KST."
+        )
+        return 0
+
+    header = (
+        f"🚀 <b>[{current_text}] Morning rebound candidates</b>\n"
+        f"found: <b>{len(results)}</b>\n"
+        "logic: prev volume spike + morning gap + rebound\n"
+    )
+    messages = []
+    for i in range(0, len(results), 4):
+        body = "\n\n".join(format_signal(item) for item in results[i : i + 4])
+        messages.append((header + "\n" if i == 0 else "") + body)
+
+    for message in messages:
+        send_telegram(message)
+
+    print(f"sent {len(results)} candidates")
+    return 0
+
 
 if __name__ == "__main__":
-    run_value_scanner()
+    sys.exit(main())
