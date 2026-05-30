@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -29,7 +32,7 @@ class ScanConfig:
     breakout_lookback: int = 60
     max_long_bearish_body_pct: float = 5.0
     min_close_position: float = 0.7
-    min_score: int = 5
+    min_score: int = 6
 
 
 CONFIG = ScanConfig()
@@ -180,6 +183,13 @@ def as_float(value) -> float:
     return float(value.item() if hasattr(value, "item") else value)
 
 
+def has_price_data(df: pd.DataFrame | None, min_rows: int = 80) -> bool:
+    if df is None or df.empty or len(df.dropna()) < min_rows:
+        return False
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    return required.issubset(set(df.columns))
+
+
 def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
     df = df.dropna().copy()
     if len(df) < 80:
@@ -298,8 +308,13 @@ def scan() -> list[dict]:
     for ticker, name in TICKERS.items():
         try:
             if ticker not in data:
+                print(f"{ticker} skipped: no data returned")
                 continue
-            signal = analyze(ticker, name, data[ticker])
+            ticker_data = data[ticker]
+            if not has_price_data(ticker_data):
+                print(f"{ticker} skipped: empty or insufficient price data")
+                continue
+            signal = analyze(ticker, name, ticker_data)
             if signal:
                 signals.append(signal)
         except Exception as exc:
