@@ -1,3 +1,53 @@
+import datetime as dt
+import os
+import sys
+from dataclasses import dataclass
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import requests
+import yfinance as yf
+
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
+EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
+KST = ZoneInfo("Asia/Seoul")
+
+
+@dataclass(frozen=True)
+class ScanConfig:
+    min_change_pct: float = 2.0
+    max_change_pct: float = 5.0
+    min_volume_ratio: float = 1.5
+    near_high_pct: float = 1.5
+    breakout_lookback: int = 60
+    min_score: int = 6
+
+
+CONFIG = ScanConfig()
+
+
+TICKERS = {
+    # KOSPI large caps
+    "005930.KS": "삼성전자",
+    "000660.KS": "SK하이닉스",
+    "005380.KS": "현대차",
+    "000270.KS": "기아",
+    "035420.KS": "NAVER",
+    "035720.KS": "카카오",
+    "068270.KS": "셀트리온",
+    "005490.KS": "POSCO홀딩스",
+    "051910.KS": "LG화학",
+    "006400.KS": "삼성SDI",
+    "373220.KS": "LG에너지솔루션",
+    "105560.KS": "KB금융",
+    "055550.KS": "신한지주",
+    "086790.KS": "하나금융지주",
+    "316140.KS": "우리금융지주",
+    "012330.KS": "현대모비스",
+    "028260.KS": "삼성물산",
+    "032830.KS": "삼성생명",
     "066570.KS": "LG전자",
     "003550.KS": "LG",
     "034730.KS": "SK",
@@ -248,3 +298,13 @@ def main() -> int:
     )
     chunks = [signals[i : i + 5] for i in range(0, len(signals), 5)]
     for index, chunk in enumerate(chunks, start=1):
+        body = "\n\n".join(format_signal(signal) for signal in chunk)
+        prefix = header + "\n" if index == 1 else ""
+        send_telegram(prefix + body)
+
+    print(f"총 {len(signals)}개 종목 전송 완료")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
