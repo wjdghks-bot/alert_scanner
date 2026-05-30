@@ -9,6 +9,11 @@ import requests
 import yfinance as yf
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
@@ -22,6 +27,8 @@ class ScanConfig:
     min_volume_ratio: float = 1.2
     near_high_pct: float = 3.0
     breakout_lookback: int = 60
+    max_long_bearish_body_pct: float = 5.0
+    min_close_position: float = 0.7
     min_score: int = 5
 
 
@@ -180,6 +187,7 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
 
     close = df["Close"]
     volume = df["Volume"]
+    df["ma5"] = close.rolling(5).mean()
     df["ma20"] = close.rolling(20).mean()
     df["ma60"] = close.rolling(60).mean()
     df["rsi"] = rsi(close)
@@ -196,6 +204,23 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
     volume_ratio = as_float(latest["Volume"]) / max(as_float(latest["vol20"]), 1)
     high_lookback = as_float(recent_before_today["High"].max())
     distance_to_high_pct = ((high_lookback - price) / high_lookback) * 100
+    day_range = max(as_float(latest["High"]) - as_float(latest["Low"]), 1)
+    close_position = (price - as_float(latest["Low"])) / day_range
+    ma5_above_ma20 = as_float(latest["ma5"]) > as_float(latest["ma20"])
+    ma5_crossed_up_ma20 = (
+        as_float(previous["ma5"]) <= as_float(previous["ma20"]) and ma5_above_ma20
+    )
+
+    recent_3 = df.tail(3)
+    has_long_bearish = False
+    for _, candle in recent_3.iterrows():
+        candle_open = as_float(candle["Open"])
+        candle_close = as_float(candle["Close"])
+        if candle_close < candle_open:
+            body_pct = ((candle_open - candle_close) / candle_open) * 100
+            if body_pct >= CONFIG.max_long_bearish_body_pct:
+                has_long_bearish = True
+                break
 
     checks = {
         "RSI 45~70": 45 <= as_float(latest["rsi"]) <= 70,
@@ -204,10 +229,18 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
         "거래량 증가": volume_ratio >= CONFIG.min_volume_ratio,
         "20일선 위": price > as_float(latest["ma20"]),
         "60일선 위": price > as_float(latest["ma60"]),
-        "당일 +2% 이상": CONFIG.min_change_pct <= change_pct <= CONFIG.max_change_pct,
+        "당일 상승률 범위": CONFIG.min_change_pct <= change_pct <= CONFIG.max_change_pct,
         "전고점 돌파 시도": price >= high_lookback or distance_to_high_pct <= CONFIG.near_high_pct,
+        "종가 고가권": close_position >= CONFIG.min_close_position,
+        "5일선 20일선 회복": ma5_above_ma20 or ma5_crossed_up_ma20,
     }
     score = sum(checks.values())
+
+    if has_long_bearish:
+        return None
+
+    if not checks["당일 상승률 범위"]:
+        return None
 
     if score < CONFIG.min_score:
         return None
@@ -222,12 +255,16 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
         "volume_ratio": volume_ratio,
         "high_lookback": high_lookback,
         "distance_to_high_pct": distance_to_high_pct,
+        "close_position": close_position,
+        "ma5": as_float(latest["ma5"]),
+        "ma20": as_float(latest["ma20"]),
         "checks": checks,
     }
 
 
 def format_signal(signal: dict) -> str:
     passed = " / ".join(name for name, ok in signal["checks"].items() if ok)
+    total_checks = len(signal["checks"])
     breakout = (
         "돌파"
         if signal["price"] >= signal["high_lookback"]
@@ -235,10 +272,12 @@ def format_signal(signal: dict) -> str:
     )
     return (
         f"<b>{signal['name']} ({signal['ticker']})</b>\n"
-        f"점수: <b>{signal['score']}/7</b>\n"
+        f"점수: <b>{signal['score']}/{total_checks}</b>\n"
         f"현재가: {signal['price']:,.0f}원 ({signal['change_pct']:+.2f}%)\n"
         f"RSI: {signal['rsi']:.1f} / 거래량: 20일 평균의 {signal['volume_ratio']:.1f}배\n"
         f"전고점: {signal['high_lookback']:,.0f}원 ({breakout})\n"
+        f"종가 위치: 당일 저가~고가 중 {signal['close_position'] * 100:.0f}% 지점\n"
+        f"MA5/MA20: {signal['ma5']:,.0f} / {signal['ma20']:,.0f}\n"
         f"통과: {passed}"
     )
 
@@ -294,7 +333,7 @@ def main() -> int:
     header = (
         f"📈 <b>[{current_text}] 국장 단타 스캐너</b>\n"
         f"조건 통과: <b>{len(signals)}개</b>\n"
-        "기준: 7개 조건 중 6개 이상 통과\n"
+        f"기준: 9개 조건 중 {CONFIG.min_score}개 이상 통과, 상승률 범위 필수, 최근 장대음봉 제외\n"
     )
     chunks = [signals[i : i + 5] for i in range(0, len(signals), 5)]
     for index, chunk in enumerate(chunks, start=1):
