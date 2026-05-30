@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -152,11 +155,19 @@ def send_telegram(text: str) -> None:
 
 
 def get_ticker_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame | None:
+    if data is None or data.empty:
+        return None
     if isinstance(data.columns, pd.MultiIndex):
         if ticker not in data.columns.get_level_values(0):
             return None
-        return data[ticker].dropna()
-    return data.dropna()
+        frame = data[ticker].dropna()
+    else:
+        frame = data.dropna()
+
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    if frame.empty or not required.issubset(set(frame.columns)):
+        return None
+    return frame
 
 
 def get_previous_session(daily: pd.DataFrame, today: dt.date) -> tuple[pd.Series, pd.Series] | None:
@@ -304,6 +315,7 @@ def scan() -> list[dict]:
             daily = get_ticker_frame(daily_all, ticker)
             intraday = get_ticker_frame(intraday_all, ticker)
             if daily is None or intraday is None:
+                print(f"{ticker} skipped: empty daily or intraday data")
                 continue
             item = analyze_one(ticker, name, daily, intraday, today)
             if item:
