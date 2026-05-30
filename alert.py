@@ -17,12 +17,12 @@ KST = ZoneInfo("Asia/Seoul")
 
 @dataclass(frozen=True)
 class ScanConfig:
-    min_change_pct: float = 2.0
-    max_change_pct: float = 5.0
-    min_volume_ratio: float = 1.5
-    near_high_pct: float = 1.5
+    min_change_pct: float = 1.0
+    max_change_pct: float = 10.0
+    min_volume_ratio: float = 1.2
+    near_high_pct: float = 3.0
     breakout_lookback: int = 60
-    min_score: int = 6
+    min_score: int = 5
 
 
 CONFIG = ScanConfig()
