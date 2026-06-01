@@ -2,9 +2,11 @@ import datetime as dt
 import html
 import logging
 import os
+import re
 import sys
 import zipfile
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
@@ -24,6 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 DART_API_KEY = os.getenv("DART_API_KEY") or os.getenv("OPENDART_API_KEY")
+KRX_API_KEY = os.getenv("KRX_API_KEY")
 EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
 KST = ZoneInfo("Asia/Seoul")
 
@@ -39,12 +42,14 @@ class ScanConfig:
     min_close_position: float = 0.7
     min_score: int = 6
     top_n: int = 20
+    news_fetch_n: int = 12
     news_top_n: int = 3
     disclosure_top_n: int = 3
     supply_lookback_days: int = 14
     foreign_surge_ratio: float = 2.0
     min_foreign_net_buy_krw: int = 500_000_000
     min_institution_net_buy_krw: int = 300_000_000
+    theme_top_n: int = 5
 
 
 CONFIG = ScanConfig()
@@ -142,6 +147,126 @@ TICKERS = {
 }
 
 
+THEMES = {
+    "AI 반도체": [
+        "ai",
+        "hbm",
+        "hbm4",
+        "hbm4e",
+        "반도체",
+        "gpu",
+        "엔비디아",
+        "데이터센터",
+        "메모리",
+        "파운드리",
+    ],
+    "보험업 재평가": [
+        "보험",
+        "손보",
+        "생보",
+        "배당",
+        "자본",
+        "투자손익",
+        "계약대출",
+        "실적",
+        "주주환원",
+    ],
+    "게임": [
+        "게임",
+        "신작",
+        "흥행",
+        "리니지",
+        "글로벌",
+        "출시",
+        "턴어라운드",
+    ],
+    "스테이블코인/결제": [
+        "스테이블코인",
+        "결제",
+        "pg",
+        "가상자산",
+        "원화",
+        "거래액",
+        "핀테크",
+    ],
+    "조선/방산": [
+        "조선",
+        "선박",
+        "수주",
+        "방산",
+        "항공우주",
+        "잠수함",
+        "함정",
+    ],
+    "건설/재건축": [
+        "건설",
+        "재건축",
+        "재개발",
+        "수주",
+        "반포",
+        "압구정",
+    ],
+    "바이오": [
+        "바이오",
+        "임상",
+        "fda",
+        "신약",
+        "품목허가",
+        "기술이전",
+    ],
+    "2차전지": [
+        "2차전지",
+        "배터리",
+        "양극재",
+        "전기차",
+        "리튬",
+        "에코프로",
+    ],
+}
+
+
+STATIC_THEMES = {
+    "삼성전자": ["AI 반도체"],
+    "SK하이닉스": ["AI 반도체"],
+    "삼성생명": ["보험업 재평가"],
+    "삼성화재": ["보험업 재평가"],
+    "DB손해보험": ["보험업 재평가"],
+    "엔씨소프트": ["게임"],
+    "크래프톤": ["게임"],
+    "위메이드": ["게임"],
+    "NHN KCP": ["스테이블코인/결제"],
+    "KG이니시스": ["스테이블코인/결제"],
+    "삼성물산": ["건설/재건축"],
+    "현대건설": ["건설/재건축"],
+    "HD한국조선해양": ["조선/방산"],
+    "HD현대중공업": ["조선/방산"],
+    "한화오션": ["조선/방산"],
+    "한화에어로스페이스": ["조선/방산"],
+}
+
+
+STRONG_NEWS_KEYWORDS = {
+    "자사주": 5,
+    "공급": 5,
+    "수주": 5,
+    "계약": 5,
+    "인수": 5,
+    "합병": 5,
+    "실적 서프라이즈": 5,
+    "흑자전환": 5,
+    "신고가": 4,
+    "목표가": 4,
+    "상향": 4,
+    "배당": 4,
+    "주주환원": 4,
+    "승인": 4,
+    "허가": 4,
+    "출시": 3,
+    "흥행": 3,
+    "기대": 2,
+}
+
+
 def now_kst() -> dt.datetime:
     return dt.datetime.now(KST)
 
@@ -184,7 +309,91 @@ def request_json(url: str, params: dict, timeout: int = 10) -> dict | None:
         return None
 
 
-def fetch_news_summary(name: str) -> list[str]:
+def clean_news_title(title: str) -> str:
+    title = html.unescape(title).strip()
+    if " - " in title:
+        title = title.rsplit(" - ", 1)[0]
+    return re.sub(r"\s+", " ", title)
+
+
+def normalize_news_title(title: str) -> str:
+    title = clean_news_title(title).lower()
+    title = re.sub(r"[^0-9a-z가-힣]+", " ", title)
+    stopwords = {"단독", "종합", "특징주", "속보", "포토", "영상"}
+    tokens = [token for token in title.split() if token not in stopwords and len(token) > 1]
+    return " ".join(tokens)
+
+
+def token_set(text: str) -> set[str]:
+    return set(normalize_news_title(text).split())
+
+
+def similar_news(a: str, b: str) -> bool:
+    left = token_set(a)
+    right = token_set(b)
+    if not left or not right:
+        return False
+    return len(left & right) / max(len(left | right), 1) >= 0.45
+
+
+def news_published_at(item: ET.Element) -> dt.datetime | None:
+    pub_date = item.findtext("pubDate", default="").strip()
+    if not pub_date:
+        return None
+    try:
+        parsed = parsedate_to_datetime(pub_date)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(KST)
+
+
+def age_text(published_at: dt.datetime | None) -> str:
+    if not published_at:
+        return "시간 미상"
+    minutes = max(int((now_kst() - published_at).total_seconds() // 60), 0)
+    if minutes < 60:
+        return f"{minutes}분 전"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}시간 전"
+    return f"{hours // 24}일 전"
+
+
+def detect_themes(text: str, name: str = "") -> list[str]:
+    haystack = f"{name} {text}".lower()
+    themes = set(STATIC_THEMES.get(name, []))
+    for theme, keywords in THEMES.items():
+        if any(keyword.lower() in haystack for keyword in keywords):
+            themes.add(theme)
+    return sorted(themes)
+
+
+def news_strength(title: str, published_at: dt.datetime | None, duplicate_count: int = 1) -> int:
+    lowered = title.lower()
+    score = 1
+    for keyword, value in STRONG_NEWS_KEYWORDS.items():
+        if keyword.lower() in lowered:
+            score = max(score, value)
+
+    if published_at:
+        hours = (now_kst() - published_at).total_seconds() / 3600
+        if hours <= 2:
+            score += 1
+        elif hours > 48:
+            score -= 1
+
+    if duplicate_count >= 3:
+        score += 1
+    return max(1, min(score, 5))
+
+
+def stars(score: int) -> str:
+    return "★" * score + "☆" * (5 - score)
+
+
+def fetch_news_summary(name: str) -> dict:
     query = f"{name} 주가 OR 실적 OR 수주 OR 계약 OR 투자"
     try:
         response = requests.get(
@@ -196,16 +405,73 @@ def fetch_news_summary(name: str) -> list[str]:
         root = ET.fromstring(response.content)
     except Exception as exc:
         print(f"{name} 뉴스 조회 실패: {exc}")
-        return []
+        return {"items": [], "recent_3d_count": 0, "themes": [], "max_strength": 0}
 
-    titles = []
+    raw_items = []
     for item in root.findall("./channel/item"):
         title = item.findtext("title", default="").strip()
         if title:
-            titles.append(html.unescape(title))
-        if len(titles) >= CONFIG.news_top_n:
+            published_at = news_published_at(item)
+            raw_items.append(
+                {
+                    "title": clean_news_title(title),
+                    "published_at": published_at,
+                    "themes": detect_themes(title, name),
+                }
+            )
+        if len(raw_items) >= CONFIG.news_fetch_n:
             break
-    return titles
+
+    recent_3d_count = 0
+    cutoff = now_kst() - dt.timedelta(days=3)
+    for item in raw_items:
+        if item["published_at"] and item["published_at"] >= cutoff:
+            recent_3d_count += 1
+
+    groups: list[dict] = []
+    for item in raw_items:
+        matched = None
+        for group in groups:
+            if similar_news(item["title"], group["title"]):
+                matched = group
+                break
+        if matched:
+            matched["duplicate_count"] += 1
+            matched["themes"] = sorted(set(matched["themes"]) | set(item["themes"]))
+            if item["published_at"] and (
+                not matched["published_at"] or item["published_at"] > matched["published_at"]
+            ):
+                matched["title"] = item["title"]
+                matched["published_at"] = item["published_at"]
+        else:
+            groups.append({**item, "duplicate_count": 1})
+
+    for group in groups:
+        group["strength"] = news_strength(
+            group["title"],
+            group["published_at"],
+            group["duplicate_count"],
+        )
+        group["age"] = age_text(group["published_at"])
+        group["stars"] = stars(group["strength"])
+
+    groups = sorted(
+        groups,
+        key=lambda x: (
+            x["strength"],
+            x["published_at"] or dt.datetime.min.replace(tzinfo=KST),
+            x["duplicate_count"],
+        ),
+        reverse=True,
+    )
+    themes = sorted({theme for group in groups for theme in group["themes"]})
+    max_strength = max((group["strength"] for group in groups), default=0)
+    return {
+        "items": groups[: CONFIG.news_top_n],
+        "recent_3d_count": recent_3d_count,
+        "themes": themes,
+        "max_strength": max_strength,
+    }
 
 
 _DART_CORP_CODES: dict[str, str] | None = None
@@ -284,6 +550,11 @@ def fetch_disclosure_summary(ticker: str) -> list[str]:
 
 
 def fetch_supply_summary(ticker: str) -> dict:
+    if KRX_API_KEY:
+        krx_url = os.getenv("KRX_SUPPLY_URL")
+        if krx_url:
+            print("KRX_SUPPLY_URL 방식은 서비스별 입력값이 달라 현재 pykrx 수급 조회를 우선 사용합니다.")
+
     try:
         from pykrx import stock
     except Exception:
@@ -447,18 +718,79 @@ def enrich_signal(signal: dict) -> dict:
     supply = fetch_supply_summary(signal["ticker"])
 
     extra_score = 0
-    if news:
-        extra_score += 1
+    news_strength_score = news.get("max_strength", 0)
+    if news_strength_score:
+        extra_score += max(1, min(3, news_strength_score - 2))
     if disclosures:
         extra_score += 1
     extra_score += sum(supply.get("checks", {}).values())
 
+    themes = sorted(set(news.get("themes", [])) | set(STATIC_THEMES.get(signal["name"], [])))
+    if themes:
+        extra_score += 1
+
     signal["news"] = news
+    signal["themes"] = themes
+    signal["news_strength"] = news_strength_score
+    signal["recent_3d_news_count"] = news.get("recent_3d_count", 0)
     signal["disclosures"] = disclosures
     signal["supply"] = supply
     signal["extra_score"] = extra_score
     signal["total_score"] = signal["score"] + extra_score
     return signal
+
+
+def build_theme_summary(signals: list[dict]) -> list[dict]:
+    theme_map: dict[str, dict] = {}
+    for signal in signals:
+        for theme in signal.get("themes", []):
+            entry = theme_map.setdefault(
+                theme,
+                {
+                    "theme": theme,
+                    "names": [],
+                    "recent_3d_count": 0,
+                    "max_strength": 0,
+                    "score": 0,
+                },
+            )
+            if signal["name"] not in entry["names"]:
+                entry["names"].append(signal["name"])
+            entry["recent_3d_count"] += signal.get("recent_3d_news_count", 0)
+            entry["max_strength"] = max(entry["max_strength"], signal.get("news_strength", 0))
+            entry["score"] += signal.get("score", 0) + signal.get("extra_score", 0)
+
+    summaries = []
+    for entry in theme_map.values():
+        related_count = len(entry["names"])
+        theme_power = min(5, max(1, entry["max_strength"] + min(2, related_count - 1)))
+        entry["theme_power"] = theme_power
+        entry["stars"] = stars(theme_power)
+        summaries.append(entry)
+
+    return sorted(
+        summaries,
+        key=lambda x: (x["theme_power"], len(x["names"]), x["recent_3d_count"], x["score"]),
+        reverse=True,
+    )[: CONFIG.theme_top_n]
+
+
+def format_theme_summary(theme_summary: list[dict]) -> str:
+    if not theme_summary:
+        return "오늘의 테마: 감지된 테마 없음"
+
+    lines = ["오늘의 테마"]
+    for item in theme_summary:
+        names = ", ".join(item["names"][:6])
+        if len(item["names"]) > 6:
+            names += f" 외 {len(item['names']) - 6}개"
+        lines.extend(
+            [
+                f"[{html.escape(item['theme'])}] {item['stars']}",
+                f"최근 3일 뉴스 {item['recent_3d_count']}회 / 관련주: {html.escape(names)}",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def format_signal(signal: dict) -> str:
@@ -488,8 +820,20 @@ def format_signal(signal: dict) -> str:
     elif supply.get("reason"):
         lines.append(f"수급: {html.escape(supply['reason'])}")
 
-    if signal.get("news"):
-        lines.append("뉴스: " + " | ".join(html.escape(title) for title in signal["news"]))
+    if signal.get("themes"):
+        lines.append("테마: " + ", ".join(html.escape(theme) for theme in signal["themes"]))
+
+    news = signal.get("news") or {}
+    news_items = news.get("items", [])
+    if news_items:
+        lines.append(f"뉴스강도: {stars(signal.get('news_strength', 0))} / 최근 3일 {signal.get('recent_3d_news_count', 0)}회")
+        news_lines = []
+        for item in news_items:
+            duplicate = f" 유사 {item['duplicate_count']}건" if item["duplicate_count"] > 1 else ""
+            news_lines.append(
+                f"{item['age']} {item['stars']} {html.escape(item['title'])}{duplicate}"
+            )
+        lines.append("뉴스: " + " | ".join(news_lines))
 
     if signal.get("disclosures"):
         lines.append("공시: " + " | ".join(html.escape(title) for title in signal["disclosures"]))
@@ -555,7 +899,9 @@ def main() -> int:
         f"<b>[{current_text}] 국장 후보 알림</b>\n"
         f"조건 통과: <b>{len(signals)}개</b>\n"
         f"기준: 9개 기술 조건 중 {CONFIG.min_score}개 이상 통과 + 뉴스/공시/수급 가점\n"
-        "참고: 공시는 DART_API_KEY, 수급은 pykrx가 있을 때 반영됩니다.\n"
+        "참고: 공시는 DART_API_KEY, 수급은 pykrx/KRX_API_KEY 준비 상태에 따라 반영됩니다.\n"
+        "\n"
+        f"{format_theme_summary(build_theme_summary(signals))}\n"
     )
     chunks = [signals[i : i + 5] for i in range(0, len(signals), 5)]
     for index, chunk in enumerate(chunks, start=1):
