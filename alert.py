@@ -53,6 +53,13 @@ class ScanConfig:
     technical_weight: float = 0.7
     material_weight: float = 0.3
     max_material_score: int = 6
+    near_high_bonus_3pct: float = 2.0
+    near_high_bonus_1pct: float = 3.0
+    far_from_high_penalty_8pct: float = -2.0
+    rsi_penalty_75: float = -5.0
+    rsi_penalty_80: float = -10.0
+    change_penalty_8pct: float = -5.0
+    low_volume_penalty: float = -5.0
 
 
 CONFIG = ScanConfig()
@@ -811,14 +818,53 @@ def enrich_signal(signal: dict) -> dict:
     material_score = min(extra_score, CONFIG.max_material_score)
     technical_ratio = signal["score"] / 9
     material_ratio = material_score / max(CONFIG.max_material_score, 1)
-    weighted_score = (
+    base_weighted_score = (
         technical_ratio * CONFIG.technical_weight
         + material_ratio * CONFIG.material_weight
     ) * 100
+    entry_adjustment, adjustment_reasons = entry_adjustments(signal)
+    weighted_score = base_weighted_score + entry_adjustment
     signal["material_score"] = material_score
     signal["total_score"] = signal["score"] + extra_score
-    signal["weighted_score"] = weighted_score
+    signal["base_weighted_score"] = base_weighted_score
+    signal["entry_adjustment"] = entry_adjustment
+    signal["adjustment_reasons"] = adjustment_reasons
+    signal["weighted_score"] = max(weighted_score, 0)
     return signal
+
+
+def entry_adjustments(signal: dict) -> tuple[float, list[str]]:
+    adjustment = 0.0
+    reasons = []
+
+    distance = signal["distance_to_high_pct"]
+    if distance < 1:
+        adjustment += CONFIG.near_high_bonus_1pct
+        reasons.append(f"전고점 1% 이내 +{CONFIG.near_high_bonus_1pct:g}")
+    elif distance < 3:
+        adjustment += CONFIG.near_high_bonus_3pct
+        reasons.append(f"전고점 3% 이내 +{CONFIG.near_high_bonus_3pct:g}")
+    elif distance > 8:
+        adjustment += CONFIG.far_from_high_penalty_8pct
+        reasons.append(f"전고점 8% 초과 {CONFIG.far_from_high_penalty_8pct:g}")
+
+    rsi_value = signal["rsi"]
+    if rsi_value >= 80:
+        adjustment += CONFIG.rsi_penalty_80
+        reasons.append(f"RSI 80 이상 {CONFIG.rsi_penalty_80:g}")
+    elif rsi_value >= 75:
+        adjustment += CONFIG.rsi_penalty_75
+        reasons.append(f"RSI 75 이상 {CONFIG.rsi_penalty_75:g}")
+
+    if signal["change_pct"] >= 8:
+        adjustment += CONFIG.change_penalty_8pct
+        reasons.append(f"당일 상승률 8% 이상 {CONFIG.change_penalty_8pct:g}")
+
+    if signal["volume_ratio"] < 0.8:
+        adjustment += CONFIG.low_volume_penalty
+        reasons.append(f"거래량 0.8배 미만 {CONFIG.low_volume_penalty:g}")
+
+    return adjustment, reasons
 
 
 def build_theme_summary(signals: list[dict]) -> list[dict]:
@@ -888,6 +934,12 @@ def format_signal(signal: dict) -> str:
         f"순위점수: <b>{signal.get('weighted_score', 0):.1f}</b> "
         f"(기술 70% {signal['score']}/{total_checks} + 재료 30% {signal.get('material_score', 0)}/{CONFIG.max_material_score})",
         f"참고점수: 기술 {signal['score']}/{total_checks} + 재료/수급 {signal.get('extra_score', 0)}",
+        f"진입보정: {signal.get('entry_adjustment', 0):+g}"
+        + (
+            " (" + ", ".join(html.escape(reason) for reason in signal.get("adjustment_reasons", [])) + ")"
+            if signal.get("adjustment_reasons")
+            else ""
+        ),
         f"현재가: {signal['price']:,.0f}원 ({signal['change_pct']:+.2f}%)",
         f"RSI: {signal['rsi']:.1f} / 거래량: 20일 평균의 {signal['volume_ratio']:.1f}배",
         f"전고점: {signal['high_lookback']:,.0f}원 ({breakout})",
