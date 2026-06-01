@@ -50,6 +50,9 @@ class ScanConfig:
     min_foreign_net_buy_krw: int = 500_000_000
     min_institution_net_buy_krw: int = 300_000_000
     theme_top_n: int = 5
+    technical_weight: float = 0.7
+    material_weight: float = 0.3
+    max_material_score: int = 6
 
 
 CONFIG = ScanConfig()
@@ -805,7 +808,16 @@ def enrich_signal(signal: dict) -> dict:
     signal["disclosures"] = disclosures
     signal["supply"] = supply
     signal["extra_score"] = extra_score
+    material_score = min(extra_score, CONFIG.max_material_score)
+    technical_ratio = signal["score"] / 9
+    material_ratio = material_score / max(CONFIG.max_material_score, 1)
+    weighted_score = (
+        technical_ratio * CONFIG.technical_weight
+        + material_ratio * CONFIG.material_weight
+    ) * 100
+    signal["material_score"] = material_score
     signal["total_score"] = signal["score"] + extra_score
+    signal["weighted_score"] = weighted_score
     return signal
 
 
@@ -827,7 +839,7 @@ def build_theme_summary(signals: list[dict]) -> list[dict]:
                 entry["names"].append(signal["name"])
             entry["recent_3d_count"] += signal.get("recent_3d_news_count", 0)
             entry["max_strength"] = max(entry["max_strength"], signal.get("news_strength", 0))
-            entry["score"] += signal.get("score", 0) + signal.get("extra_score", 0)
+            entry["score"] += signal.get("weighted_score", 0)
 
     summaries = []
     for entry in theme_map.values():
@@ -873,8 +885,9 @@ def format_signal(signal: dict) -> str:
 
     lines = [
         f"<b>{signal['name']} ({signal['ticker']})</b>",
-        f"점수: <b>{signal.get('total_score', signal['score'])}</b> "
-        f"(기술 {signal['score']}/{total_checks} + 재료/수급 {signal.get('extra_score', 0)})",
+        f"순위점수: <b>{signal.get('weighted_score', 0):.1f}</b> "
+        f"(기술 70% {signal['score']}/{total_checks} + 재료 30% {signal.get('material_score', 0)}/{CONFIG.max_material_score})",
+        f"참고점수: 기술 {signal['score']}/{total_checks} + 재료/수급 {signal.get('extra_score', 0)}",
         f"현재가: {signal['price']:,.0f}원 ({signal['change_pct']:+.2f}%)",
         f"RSI: {signal['rsi']:.1f} / 거래량: 20일 평균의 {signal['volume_ratio']:.1f}배",
         f"전고점: {signal['high_lookback']:,.0f}원 ({breakout})",
@@ -941,7 +954,12 @@ def scan() -> list[dict]:
     enriched = [enrich_signal(signal) for signal in signals]
     return sorted(
         enriched,
-        key=lambda x: (x.get("total_score", x["score"]), x["score"], x["change_pct"], x["volume_ratio"]),
+        key=lambda x: (
+            x.get("weighted_score", 0),
+            x["score"],
+            x["change_pct"],
+            x["volume_ratio"],
+        ),
         reverse=True,
     )[: CONFIG.top_n]
 
@@ -967,7 +985,7 @@ def main() -> int:
     header = (
         f"<b>[{current_text}] 국장 후보 알림</b>\n"
         f"조건 통과: <b>{len(signals)}개</b>\n"
-        f"기준: 9개 기술 조건 중 {CONFIG.min_score}개 이상 통과 + 뉴스/공시/수급 가점\n"
+        f"기준: 9개 기술 조건 중 {CONFIG.min_score}개 이상 통과, 정렬은 기술 70% + 재료/뉴스 30%\n"
         "참고: 공시는 DART_API_KEY, 수급은 pykrx/KRX_API_KEY 준비 상태에 따라 반영됩니다.\n"
         "\n"
         f"{format_theme_summary(build_theme_summary(signals))}\n"
