@@ -27,5 +27,5 @@ jobs:
           PYTHONIOENCODING: "utf-8"
           TZ: "Asia/Seoul"
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-        run: |
-          python alert.py && python alert_value.py
+        run:
+          python alert.py
