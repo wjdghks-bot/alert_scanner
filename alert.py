@@ -1,9 +1,13 @@
 import datetime as dt
+import html
 import logging
 import os
 import sys
+import zipfile
 from dataclasses import dataclass
+from io import BytesIO
 from zoneinfo import ZoneInfo
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 import requests
@@ -19,6 +23,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
+DART_API_KEY = os.getenv("DART_API_KEY") or os.getenv("OPENDART_API_KEY")
 EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
 KST = ZoneInfo("Asia/Seoul")
 
@@ -33,13 +38,19 @@ class ScanConfig:
     max_long_bearish_body_pct: float = 5.0
     min_close_position: float = 0.7
     min_score: int = 6
+    top_n: int = 20
+    news_top_n: int = 3
+    disclosure_top_n: int = 3
+    supply_lookback_days: int = 14
+    foreign_surge_ratio: float = 2.0
+    min_foreign_net_buy_krw: int = 500_000_000
+    min_institution_net_buy_krw: int = 300_000_000
 
 
 CONFIG = ScanConfig()
 
 
 TICKERS = {
-    # KOSPI large caps
     "005930.KS": "삼성전자",
     "000660.KS": "SK하이닉스",
     "005380.KS": "현대차",
@@ -82,7 +93,7 @@ TICKERS = {
     "051900.KS": "LG생활건강",
     "090430.KS": "아모레퍼시픽",
     "097950.KS": "CJ제일제당",
-    "018260.KS": "삼성에스디에스",
+    "018260.KS": "삼성SDS",
     "036570.KS": "엔씨소프트",
     "259960.KS": "크래프톤",
     "302440.KS": "SK바이오사이언스",
@@ -99,7 +110,6 @@ TICKERS = {
     "000810.KS": "삼성화재",
     "005830.KS": "DB손해보험",
     "138040.KS": "메리츠금융지주",
-    # KOSDAQ leaders
     "247540.KQ": "에코프로비엠",
     "086520.KQ": "에코프로",
     "066970.KQ": "엘앤에프",
@@ -111,8 +121,8 @@ TICKERS = {
     "058470.KQ": "리노공업",
     "112040.KQ": "위메이드",
     "035900.KQ": "JYP Ent.",
-    "041510.KQ": "에스엠",
-    "122870.KQ": "와이지엔터테인먼트",
+    "041510.KQ": "SM",
+    "122870.KQ": "YG Ent.",
     "293490.KQ": "카카오게임즈",
     "263750.KQ": "펄어비스",
     "067160.KQ": "메디톡스",
@@ -158,6 +168,173 @@ def send_telegram(text: str) -> None:
         timeout=20,
     )
     response.raise_for_status()
+
+
+def stock_code(ticker: str) -> str:
+    return ticker.split(".", 1)[0]
+
+
+def request_json(url: str, params: dict, timeout: int = 10) -> dict | None:
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        print(f"외부 데이터 요청 실패: {exc}")
+        return None
+
+
+def fetch_news_summary(name: str) -> list[str]:
+    query = f"{name} 주가 OR 실적 OR 수주 OR 계약 OR 투자"
+    try:
+        response = requests.get(
+            "https://news.google.com/rss/search",
+            params={"q": query, "hl": "ko", "gl": "KR", "ceid": "KR:ko"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+    except Exception as exc:
+        print(f"{name} 뉴스 조회 실패: {exc}")
+        return []
+
+    titles = []
+    for item in root.findall("./channel/item"):
+        title = item.findtext("title", default="").strip()
+        if title:
+            titles.append(html.unescape(title))
+        if len(titles) >= CONFIG.news_top_n:
+            break
+    return titles
+
+
+_DART_CORP_CODES: dict[str, str] | None = None
+
+
+def load_dart_corp_codes() -> dict[str, str]:
+    global _DART_CORP_CODES
+    if _DART_CORP_CODES is not None:
+        return _DART_CORP_CODES
+
+    mapping: dict[str, str] = {}
+    manual_mapping = os.getenv("DART_CORP_CODES", "")
+    for pair in manual_mapping.split(","):
+        if "=" in pair:
+            code, corp_code = pair.split("=", 1)
+            mapping[code.strip()] = corp_code.strip()
+
+    if not DART_API_KEY:
+        _DART_CORP_CODES = mapping
+        return _DART_CORP_CODES
+
+    try:
+        response = requests.get(
+            "https://opendart.fss.or.kr/api/corpCode.xml",
+            params={"crtfc_key": DART_API_KEY},
+            timeout=20,
+        )
+        response.raise_for_status()
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            xml_bytes = archive.read("CORPCODE.xml")
+        root = ET.fromstring(xml_bytes)
+        for item in root.findall("list"):
+            code = item.findtext("stock_code", default="").strip()
+            corp_code = item.findtext("corp_code", default="").strip()
+            if code and corp_code:
+                mapping[code] = corp_code
+    except Exception as exc:
+        print(f"DART 기업코드 조회 실패: {exc}")
+
+    _DART_CORP_CODES = mapping
+    return _DART_CORP_CODES
+
+
+def fetch_disclosure_summary(ticker: str) -> list[str]:
+    if not DART_API_KEY:
+        return []
+
+    corp_code = load_dart_corp_codes().get(stock_code(ticker))
+    if not corp_code:
+        return []
+
+    today = now_kst().date()
+    start = today - dt.timedelta(days=7)
+    data = request_json(
+        "https://opendart.fss.or.kr/api/list.json",
+        {
+            "crtfc_key": DART_API_KEY,
+            "corp_code": corp_code,
+            "bgn_de": start.strftime("%Y%m%d"),
+            "end_de": today.strftime("%Y%m%d"),
+            "page_count": CONFIG.disclosure_top_n,
+            "sort": "date",
+            "sort_mth": "desc",
+        },
+    )
+    if not data or data.get("status") not in {"000", "013"}:
+        return []
+
+    disclosures = []
+    for item in data.get("list", []):
+        date_text = item.get("rcept_dt", "")
+        report = item.get("report_nm", "")
+        if date_text and report:
+            disclosures.append(f"{date_text} {report}")
+    return disclosures[: CONFIG.disclosure_top_n]
+
+
+def fetch_supply_summary(ticker: str) -> dict:
+    try:
+        from pykrx import stock
+    except Exception:
+        return {"available": False, "reason": "pykrx 미설치", "checks": {}, "lines": []}
+
+    end = now_kst().date()
+    start = end - dt.timedelta(days=CONFIG.supply_lookback_days)
+    try:
+        df = stock.get_market_trading_value_by_date(
+            start.strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+            stock_code(ticker),
+        )
+    except Exception as exc:
+        return {"available": False, "reason": f"수급 조회 실패: {exc}", "checks": {}, "lines": []}
+
+    if df is None or df.empty:
+        return {"available": False, "reason": "수급 데이터 없음", "checks": {}, "lines": []}
+
+    foreign_col = "외국인합계" if "외국인합계" in df.columns else "외국인"
+    institution_col = "기관합계"
+    if foreign_col not in df.columns or institution_col not in df.columns:
+        return {"available": False, "reason": "외국인/기관 컬럼 없음", "checks": {}, "lines": []}
+
+    df = df[[foreign_col, institution_col]].dropna()
+    if len(df) < 2:
+        return {"available": False, "reason": "수급 데이터 부족", "checks": {}, "lines": []}
+
+    latest = df.iloc[-1]
+    previous = df.iloc[-2]
+    foreign_net = float(latest[foreign_col])
+    institution_net = float(latest[institution_col])
+    prev_institution_net = float(previous[institution_col])
+    foreign_avg = float(df[foreign_col].iloc[:-1].tail(5).mean())
+    foreign_base = max(abs(foreign_avg), 1)
+
+    checks = {
+        "외국인 순매수": foreign_net >= CONFIG.min_foreign_net_buy_krw,
+        "외국인 순매수 급증": foreign_net > 0 and foreign_net / foreign_base >= CONFIG.foreign_surge_ratio,
+        "기관 순매수 전환": institution_net >= CONFIG.min_institution_net_buy_krw and prev_institution_net <= 0,
+        "외국인+기관 동시 순매수": foreign_net > 0 and institution_net > 0,
+    }
+    lines = [
+        f"외국인 {foreign_net / 100_000_000:+.1f}억원",
+        f"기관 {institution_net / 100_000_000:+.1f}억원",
+    ]
+    passed = [name for name, ok in checks.items() if ok]
+    if passed:
+        lines.append("통과: " + ", ".join(passed))
+
+    return {"available": True, "reason": "", "checks": checks, "lines": lines}
 
 
 def rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -217,13 +394,10 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
     day_range = max(as_float(latest["High"]) - as_float(latest["Low"]), 1)
     close_position = (price - as_float(latest["Low"])) / day_range
     ma5_above_ma20 = as_float(latest["ma5"]) > as_float(latest["ma20"])
-    ma5_crossed_up_ma20 = (
-        as_float(previous["ma5"]) <= as_float(previous["ma20"]) and ma5_above_ma20
-    )
+    ma5_crossed_up_ma20 = as_float(previous["ma5"]) <= as_float(previous["ma20"]) and ma5_above_ma20
 
-    recent_3 = df.tail(3)
     has_long_bearish = False
-    for _, candle in recent_3.iterrows():
+    for _, candle in df.tail(3).iterrows():
         candle_open = as_float(candle["Open"])
         candle_close = as_float(candle["Close"])
         if candle_close < candle_open:
@@ -242,17 +416,11 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
         "당일 상승률 범위": CONFIG.min_change_pct <= change_pct <= CONFIG.max_change_pct,
         "전고점 돌파 시도": price >= high_lookback or distance_to_high_pct <= CONFIG.near_high_pct,
         "종가 고가권": close_position >= CONFIG.min_close_position,
-        "5일선 20일선 회복": ma5_above_ma20 or ma5_crossed_up_ma20,
+        "5일선 20일선 돌파": ma5_above_ma20 or ma5_crossed_up_ma20,
     }
     score = sum(checks.values())
 
-    if has_long_bearish:
-        return None
-
-    if not checks["당일 상승률 범위"]:
-        return None
-
-    if score < CONFIG.min_score:
+    if has_long_bearish or not checks["당일 상승률 범위"] or score < CONFIG.min_score:
         return None
 
     return {
@@ -272,6 +440,27 @@ def analyze(ticker: str, name: str, df: pd.DataFrame) -> dict | None:
     }
 
 
+def enrich_signal(signal: dict) -> dict:
+    signal = signal.copy()
+    news = fetch_news_summary(signal["name"])
+    disclosures = fetch_disclosure_summary(signal["ticker"])
+    supply = fetch_supply_summary(signal["ticker"])
+
+    extra_score = 0
+    if news:
+        extra_score += 1
+    if disclosures:
+        extra_score += 1
+    extra_score += sum(supply.get("checks", {}).values())
+
+    signal["news"] = news
+    signal["disclosures"] = disclosures
+    signal["supply"] = supply
+    signal["extra_score"] = extra_score
+    signal["total_score"] = signal["score"] + extra_score
+    return signal
+
+
 def format_signal(signal: dict) -> str:
     passed = " / ".join(name for name, ok in signal["checks"].items() if ok)
     total_checks = len(signal["checks"])
@@ -280,16 +469,32 @@ def format_signal(signal: dict) -> str:
         if signal["price"] >= signal["high_lookback"]
         else f"전고점까지 {signal['distance_to_high_pct']:.2f}%"
     )
-    return (
-        f"<b>{signal['name']} ({signal['ticker']})</b>\n"
-        f"점수: <b>{signal['score']}/{total_checks}</b>\n"
-        f"현재가: {signal['price']:,.0f}원 ({signal['change_pct']:+.2f}%)\n"
-        f"RSI: {signal['rsi']:.1f} / 거래량: 20일 평균의 {signal['volume_ratio']:.1f}배\n"
-        f"전고점: {signal['high_lookback']:,.0f}원 ({breakout})\n"
-        f"종가 위치: 당일 저가~고가 중 {signal['close_position'] * 100:.0f}% 지점\n"
-        f"MA5/MA20: {signal['ma5']:,.0f} / {signal['ma20']:,.0f}\n"
-        f"통과: {passed}"
-    )
+
+    lines = [
+        f"<b>{signal['name']} ({signal['ticker']})</b>",
+        f"점수: <b>{signal.get('total_score', signal['score'])}</b> "
+        f"(기술 {signal['score']}/{total_checks} + 재료/수급 {signal.get('extra_score', 0)})",
+        f"현재가: {signal['price']:,.0f}원 ({signal['change_pct']:+.2f}%)",
+        f"RSI: {signal['rsi']:.1f} / 거래량: 20일 평균의 {signal['volume_ratio']:.1f}배",
+        f"전고점: {signal['high_lookback']:,.0f}원 ({breakout})",
+        f"종가 위치: 당일 저가~고가 중 {signal['close_position'] * 100:.0f}% 지점",
+        f"MA5/MA20: {signal['ma5']:,.0f} / {signal['ma20']:,.0f}",
+        f"통과: {html.escape(passed)}",
+    ]
+
+    supply = signal.get("supply") or {}
+    if supply.get("available"):
+        lines.append("수급: " + " / ".join(html.escape(line) for line in supply["lines"]))
+    elif supply.get("reason"):
+        lines.append(f"수급: {html.escape(supply['reason'])}")
+
+    if signal.get("news"):
+        lines.append("뉴스: " + " | ".join(html.escape(title) for title in signal["news"]))
+
+    if signal.get("disclosures"):
+        lines.append("공시: " + " | ".join(html.escape(title) for title in signal["disclosures"]))
+
+    return "\n".join(lines)
 
 
 def scan() -> list[dict]:
@@ -308,11 +513,11 @@ def scan() -> list[dict]:
     for ticker, name in TICKERS.items():
         try:
             if ticker not in data:
-                print(f"{ticker} skipped: no data returned")
+                print(f"{ticker} 건너뜀: 데이터 없음")
                 continue
             ticker_data = data[ticker]
             if not has_price_data(ticker_data):
-                print(f"{ticker} skipped: empty or insufficient price data")
+                print(f"{ticker} 건너뜀: 가격 데이터 부족")
                 continue
             signal = analyze(ticker, name, ticker_data)
             if signal:
@@ -320,11 +525,12 @@ def scan() -> list[dict]:
         except Exception as exc:
             print(f"{ticker} 분석 실패: {exc}")
 
+    enriched = [enrich_signal(signal) for signal in signals]
     return sorted(
-        signals,
-        key=lambda x: (x["score"], x["change_pct"], x["volume_ratio"]),
+        enriched,
+        key=lambda x: (x.get("total_score", x["score"]), x["score"], x["change_pct"], x["volume_ratio"]),
         reverse=True,
-    )
+    )[: CONFIG.top_n]
 
 
 def main() -> int:
@@ -334,21 +540,22 @@ def main() -> int:
         print(f"[{current_text}] 장 마감 이후 예약 실행이라 종료합니다.")
         return 0
 
-    print(f"[{current_text}] 국장 스캐너를 시작합니다. event={EVENT_NAME}")
+    print(f"[{current_text}] 국장 스윙 알림을 시작합니다. event={EVENT_NAME}")
     signals = scan()
 
     if not signals:
         send_telegram(
-            f"📊 <b>[{current_text}] 국장 스캐너 완료</b>\n\n"
+            f"<b>[{current_text}] 국장 스윙 알림 완료</b>\n\n"
             "조건을 만족한 종목이 없습니다.\n"
             "조건: RSI + MACD + 거래량 + 20/60일선 + 상승률 + 전고점"
         )
         return 0
 
     header = (
-        f"📈 <b>[{current_text}] 국장 단타 스캐너</b>\n"
+        f"<b>[{current_text}] 국장 후보 알림</b>\n"
         f"조건 통과: <b>{len(signals)}개</b>\n"
-        f"기준: 9개 조건 중 {CONFIG.min_score}개 이상 통과, 상승률 범위 필수, 최근 장대음봉 제외\n"
+        f"기준: 9개 기술 조건 중 {CONFIG.min_score}개 이상 통과 + 뉴스/공시/수급 가점\n"
+        "참고: 공시는 DART_API_KEY, 수급은 pykrx가 있을 때 반영됩니다.\n"
     )
     chunks = [signals[i : i + 5] for i in range(0, len(signals), 5)]
     for index, chunk in enumerate(chunks, start=1):
