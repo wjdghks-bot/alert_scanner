@@ -164,12 +164,13 @@ THEMES = {
         "보험",
         "손보",
         "생보",
-        "배당",
-        "자본",
+        "보험계약",
+        "보험계약대출",
+        "생명보험",
+        "손해보험",
+        "ifrs17",
+        "킥스",
         "투자손익",
-        "계약대출",
-        "실적",
-        "주주환원",
     ],
     "게임": [
         "게임",
@@ -245,6 +246,12 @@ STATIC_THEMES = {
 }
 
 
+THEME_ELIGIBLE_NAMES = {
+    theme: {name for name, themes in STATIC_THEMES.items() if theme in themes}
+    for theme in THEMES
+}
+
+
 STRONG_NEWS_KEYWORDS = {
     "자사주": 5,
     "공급": 5,
@@ -265,6 +272,43 @@ STRONG_NEWS_KEYWORDS = {
     "흥행": 3,
     "기대": 2,
 }
+
+
+GOOD_NEWS_KEYWORDS = {
+    "목표가": 2,
+    "상향": 2,
+    "신규 커버리지": 2,
+    "실적 상향": 2,
+    "수주": 2,
+    "공급계약": 2,
+    "계약 체결": 2,
+    "m&a": 2,
+    "인수": 2,
+    "합병": 2,
+    "자사주": 2,
+    "배당": 2,
+    "주주환원": 2,
+    "흑자전환": 2,
+    "실적 서프라이즈": 2,
+    "어닝 서프라이즈": 2,
+}
+
+
+DROP_NEWS_KEYWORDS = [
+    "주가 상승 중",
+    "주가 강세",
+    "상승세",
+    "장중 수급 포착",
+    "장중",
+    "시황",
+    "마감 시황",
+    "증시",
+    "코스피",
+    "코스닥",
+    "특징주",
+    "오늘의 종목",
+    "투자분석",
+]
 
 
 def now_kst() -> dt.datetime:
@@ -336,6 +380,19 @@ def similar_news(a: str, b: str) -> bool:
     return len(left & right) / max(len(left | right), 1) >= 0.45
 
 
+def is_low_quality_news(title: str) -> bool:
+    lowered = title.lower()
+    return any(keyword.lower() in lowered for keyword in DROP_NEWS_KEYWORDS)
+
+
+def news_quality_bonus(title: str) -> int:
+    lowered = title.lower()
+    return max(
+        (bonus for keyword, bonus in GOOD_NEWS_KEYWORDS.items() if keyword.lower() in lowered),
+        default=0,
+    )
+
+
 def news_published_at(item: ET.Element) -> dt.datetime | None:
     pub_date = item.findtext("pubDate", default="").strip()
     if not pub_date:
@@ -363,16 +420,22 @@ def age_text(published_at: dt.datetime | None) -> str:
 
 def detect_themes(text: str, name: str = "") -> list[str]:
     haystack = f"{name} {text}".lower()
-    themes = set(STATIC_THEMES.get(name, []))
+    themes = set()
     for theme, keywords in THEMES.items():
+        eligible_names = THEME_ELIGIBLE_NAMES.get(theme, set())
+        if eligible_names and name not in eligible_names:
+            continue
         if any(keyword.lower() in haystack for keyword in keywords):
             themes.add(theme)
     return sorted(themes)
 
 
 def news_strength(title: str, published_at: dt.datetime | None, duplicate_count: int = 1) -> int:
+    if is_low_quality_news(title):
+        return 0
+
     lowered = title.lower()
-    score = 1
+    score = 1 + news_quality_bonus(title)
     for keyword, value in STRONG_NEWS_KEYWORDS.items():
         if keyword.lower() in lowered:
             score = max(score, value)
@@ -411,12 +474,15 @@ def fetch_news_summary(name: str) -> dict:
     for item in root.findall("./channel/item"):
         title = item.findtext("title", default="").strip()
         if title:
+            clean_title = clean_news_title(title)
+            if is_low_quality_news(clean_title):
+                continue
             published_at = news_published_at(item)
             raw_items.append(
                 {
-                    "title": clean_news_title(title),
+                    "title": clean_title,
                     "published_at": published_at,
-                    "themes": detect_themes(title, name),
+                    "themes": detect_themes(clean_title, name),
                 }
             )
         if len(raw_items) >= CONFIG.news_fetch_n:
@@ -452,9 +518,12 @@ def fetch_news_summary(name: str) -> dict:
             group["published_at"],
             group["duplicate_count"],
         )
+        if group["strength"] <= 0:
+            continue
         group["age"] = age_text(group["published_at"])
         group["stars"] = stars(group["strength"])
 
+    groups = [group for group in groups if group.get("strength", 0) > 0]
     groups = sorted(
         groups,
         key=lambda x: (
