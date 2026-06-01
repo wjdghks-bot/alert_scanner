@@ -41,92 +41,92 @@ CONFIG = Config()
 
 
 TICKERS = {
-    "005930.KS": "SamsungElec",
-    "000660.KS": "SKHynix",
-    "005380.KS": "HyundaiMotor",
-    "000270.KS": "Kia",
+    "005930.KS": "삼성전자",
+    "000660.KS": "SK하이닉스",
+    "005380.KS": "현대차",
+    "000270.KS": "기아",
     "035420.KS": "NAVER",
-    "035720.KS": "Kakao",
-    "068270.KS": "Celltrion",
-    "005490.KS": "POSCOHoldings",
-    "051910.KS": "LGChem",
-    "006400.KS": "SamsungSDI",
-    "373220.KS": "LGEnergySolution",
-    "105560.KS": "KBFinancial",
-    "055550.KS": "Shinhan",
-    "086790.KS": "HanaFinancial",
-    "316140.KS": "WooriFinancial",
-    "012330.KS": "HyundaiMobis",
-    "028260.KS": "SamsungC&T",
-    "032830.KS": "SamsungLife",
-    "066570.KS": "LGElectronics",
+    "035720.KS": "카카오",
+    "068270.KS": "셀트리온",
+    "005490.KS": "POSCO홀딩스",
+    "051910.KS": "LG화학",
+    "006400.KS": "삼성SDI",
+    "373220.KS": "LG에너지솔루션",
+    "105560.KS": "KB금융",
+    "055550.KS": "신한지주",
+    "086790.KS": "하나금융지주",
+    "316140.KS": "우리금융지주",
+    "012330.KS": "현대모비스",
+    "028260.KS": "삼성물산",
+    "032830.KS": "삼성생명",
+    "066570.KS": "LG전자",
     "003550.KS": "LG",
     "034730.KS": "SK",
-    "096770.KS": "SKInnovation",
-    "015760.KS": "KEPCO",
+    "096770.KS": "SK이노베이션",
+    "015760.KS": "한국전력",
     "033780.KS": "KT&G",
-    "017670.KS": "SKTelecom",
+    "017670.KS": "SK텔레콤",
     "030200.KS": "KT",
-    "009150.KS": "SamsungElecMech",
-    "010130.KS": "KoreaZinc",
-    "010950.KS": "SOil",
+    "009150.KS": "삼성전기",
+    "010130.KS": "고려아연",
+    "010950.KS": "S-Oil",
     "011200.KS": "HMM",
-    "047050.KS": "POSCOIntl",
-    "042660.KS": "HanwhaOcean",
-    "009540.KS": "HDKSOE",
-    "329180.KS": "HDHyundaiHeavy",
-    "010140.KS": "SamsungHeavy",
-    "034020.KS": "DoosanEnerbility",
-    "012450.KS": "HanwhaAerospace",
-    "000720.KS": "HyundaiE&C",
-    "028050.KS": "SamsungE&A",
-    "051900.KS": "LGH&H",
-    "090430.KS": "AmorePacific",
-    "097950.KS": "CJCheilJedang",
-    "018260.KS": "SamsungSDS",
-    "036570.KS": "NCSOFT",
-    "259960.KS": "Krafton",
-    "302440.KS": "SKBioscience",
-    "326030.KS": "SKBiopharm",
-    "128940.KS": "HanmiPharm",
-    "011070.KS": "LGInnotek",
-    "034220.KS": "LGDisplay",
-    "004020.KS": "HyundaiSteel",
+    "047050.KS": "포스코인터내셔널",
+    "042660.KS": "한화오션",
+    "009540.KS": "HD한국조선해양",
+    "329180.KS": "HD현대중공업",
+    "010140.KS": "삼성중공업",
+    "034020.KS": "두산에너빌리티",
+    "012450.KS": "한화에어로스페이스",
+    "000720.KS": "현대건설",
+    "028050.KS": "삼성E&A",
+    "051900.KS": "LG생활건강",
+    "090430.KS": "아모레퍼시픽",
+    "097950.KS": "CJ제일제당",
+    "018260.KS": "삼성SDS",
+    "036570.KS": "엔씨소프트",
+    "259960.KS": "크래프톤",
+    "302440.KS": "SK바이오사이언스",
+    "326030.KS": "SK바이오팜",
+    "128940.KS": "한미약품",
+    "011070.KS": "LG이노텍",
+    "034220.KS": "LG디스플레이",
+    "004020.KS": "현대제철",
     "006260.KS": "LS",
-    "010120.KS": "LSElectric",
-    "071050.KS": "KoreaInvestment",
-    "016360.KS": "SamsungSec",
-    "024110.KS": "IBK",
-    "000810.KS": "SamsungFire",
-    "005830.KS": "DBInsurance",
-    "138040.KS": "MeritzFinancial",
-    "247540.KQ": "EcoProBM",
-    "086520.KQ": "EcoPro",
+    "010120.KS": "LS ELECTRIC",
+    "071050.KS": "한국금융지주",
+    "016360.KS": "삼성증권",
+    "024110.KS": "기업은행",
+    "000810.KS": "삼성화재",
+    "005830.KS": "DB손해보험",
+    "138040.KS": "메리츠금융지주",
+    "247540.KQ": "에코프로비엠",
+    "086520.KQ": "에코프로",
     "028300.KQ": "HLB",
-    "196170.KQ": "Alteogen",
-    "068760.KQ": "CelltrionPharm",
-    "145020.KQ": "Hugel",
-    "214150.KQ": "Classys",
-    "058470.KQ": "Leeno",
-    "112040.KQ": "Wemade",
-    "035900.KQ": "JYPEnt",
+    "196170.KQ": "알테오젠",
+    "068760.KQ": "셀트리온제약",
+    "145020.KQ": "휴젤",
+    "214150.KQ": "클래시스",
+    "058470.KQ": "리노공업",
+    "112040.KQ": "위메이드",
+    "035900.KQ": "JYP Ent.",
     "041510.KQ": "SM",
-    "122870.KQ": "YGEnt",
-    "293490.KQ": "KakaoGames",
-    "263750.KQ": "PearlAbyss",
-    "067160.KQ": "Medytox",
-    "039030.KQ": "EO Technics",
-    "036830.KQ": "Soulbrain",
+    "122870.KQ": "YG Ent.",
+    "293490.KQ": "카카오게임즈",
+    "263750.KQ": "펄어비스",
+    "067160.KQ": "메디톡스",
+    "039030.KQ": "이오테크닉스",
+    "036830.KQ": "솔브레인",
     "095340.KQ": "ISC",
-    "240810.KQ": "WonikIPS",
-    "078340.KQ": "Com2uS",
-    "060250.KQ": "NHNKCP",
-    "035600.KQ": "KGInicis",
-    "000250.KQ": "Samchundang",
-    "084370.KQ": "EugeneTech",
-    "098460.KQ": "KohYoung",
-    "053030.KQ": "Binex",
-    "042000.KQ": "Cafe24",
+    "240810.KQ": "원익IPS",
+    "078340.KQ": "컴투스",
+    "060250.KQ": "NHN KCP",
+    "035600.KQ": "KG이니시스",
+    "000250.KQ": "삼천당제약",
+    "084370.KQ": "유진테크",
+    "098460.KQ": "고영",
+    "053030.KQ": "바이넥스",
+    "042000.KQ": "카페24",
 }
 
 
@@ -136,7 +136,7 @@ def now_kst() -> dt.datetime:
 
 def send_telegram(text: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID. Printing only.")
+        print("TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 없습니다. 텔레그램 전송 없이 화면에만 출력합니다.")
         print(text)
         return
 
@@ -275,14 +275,14 @@ def analyze_one(
 
 
 def format_signal(item: dict) -> str:
-    near_high = "yes" if item["near_today_high"] else "no"
+    near_high = "예" if item["near_today_high"] else "아니오"
     return (
         f"<b>{item['name']} ({item['ticker']})</b>\n"
-        f"score: <b>{item['score']}/9</b>\n"
-        f"price: {item['last_price']:,.0f} KRW ({item['current_change_pct']:+.2f}% vs prev close)\n"
-        f"open gap: {item['open_gap_pct']:+.2f}% / rebound: {item['rebound_from_open_pct']:+.2f}%\n"
-        f"prev day: {item['prev_change_pct']:+.2f}% / volume x{item['prev_volume_ratio']:.1f}\n"
-        f"today volume: {item['today_volume_vs_prev_pct']:.1f}% of prev day / near high: {near_high}"
+        f"점수: <b>{item['score']}/9</b>\n"
+        f"현재가: {item['last_price']:,.0f}원 (전일 종가 대비 {item['current_change_pct']:+.2f}%)\n"
+        f"시초가 갭: {item['open_gap_pct']:+.2f}% / 시초가 대비 반등: {item['rebound_from_open_pct']:+.2f}%\n"
+        f"전일 등락률: {item['prev_change_pct']:+.2f}% / 전일 거래량: 20일 평균의 {item['prev_volume_ratio']:.1f}배\n"
+        f"금일 누적 거래량: 전일의 {item['today_volume_vs_prev_pct']:.1f}% / 당일 고가 근처: {near_high}"
     )
 
 
@@ -315,13 +315,13 @@ def scan() -> list[dict]:
             daily = get_ticker_frame(daily_all, ticker)
             intraday = get_ticker_frame(intraday_all, ticker)
             if daily is None or intraday is None:
-                print(f"{ticker} skipped: empty daily or intraday data")
+                print(f"{ticker} 건너뜀: 일봉 또는 분봉 데이터가 비어 있습니다.")
                 continue
             item = analyze_one(ticker, name, daily, intraday, today)
             if item:
                 results.append(item)
         except Exception as exc:
-            print(f"{ticker} failed: {exc}")
+            print(f"{ticker} 처리 실패: {exc}")
 
     return sorted(
         results,
@@ -337,25 +337,25 @@ def scan() -> list[dict]:
 def main() -> int:
     current = now_kst()
     current_text = current.strftime("%Y-%m-%d %H:%M")
-    print(f"[{current_text}] morning rebound scanner started. event={EVENT_NAME}")
+    print(f"[{current_text}] 오전 반등 검색기를 시작합니다. event={EVENT_NAME}")
 
     if EVENT_NAME == "schedule" and current.hour >= 16:
-        print("Market is closed. Scheduled run skipped.")
+        print("장이 마감되었습니다. 예약 실행을 건너뜁니다.")
         return 0
 
     results = scan()
     if not results:
         send_telegram(
-            f"📭 <b>[{current_text}] Morning rebound scanner</b>\n\n"
-            "No candidates found.\n"
-            "Temporary yfinance version. Best run time: 09:30-09:45 KST."
+            f"<b>[{current_text}] 오전 반등 검색기</b>\n\n"
+            "조건에 맞는 후보가 없습니다.\n"
+            "임시 yfinance 버전입니다. 권장 실행 시간: 한국시간 09:30-09:45."
         )
         return 0
 
     header = (
-        f"🚀 <b>[{current_text}] Morning rebound candidates</b>\n"
-        f"found: <b>{len(results)}</b>\n"
-        "logic: prev volume spike + morning gap + rebound\n"
+        f"<b>[{current_text}] 오전 반등 후보</b>\n"
+        f"발견 종목 수: <b>{len(results)}</b>\n"
+        "조건: 전일 거래량 급증 + 오전 갭 조건 + 시초가 대비 반등\n"
     )
     messages = []
     for i in range(0, len(results), 4):
@@ -365,7 +365,7 @@ def main() -> int:
     for message in messages:
         send_telegram(message)
 
-    print(f"sent {len(results)} candidates")
+    print(f"후보 {len(results)}개를 전송했습니다.")
     return 0
 
 
